@@ -104,7 +104,7 @@
       "icon": "build/pareto-logo.ico"
     },
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "icon": "build/pareto-logo.ico",
       "artifactName": "ParetoUI-23.10.25-win64.exe"
     },
