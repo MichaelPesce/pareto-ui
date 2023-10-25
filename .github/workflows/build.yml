@@ -3,7 +3,7 @@ name: App build
 on:
   push:
     branches:
-      - "build"
+      - "0.9.0-build"
 
 defaults:
   run:
@@ -47,9 +47,13 @@ jobs:
       #   working-directory: ../
       #   run: git clone https://github.com/MichaelPesce/project-pareto.git && cd project-pareto && pip install --progress-bar off .
 
+      # - name: Install Pareto locally
+      #   working-directory: ../
+      #   run: git clone https://github.com/project-pareto/project-pareto.git && cd project-pareto && git fetch --all --tags && git checkout 0.9.0rc0 && pip install --progress-bar off .
+
       - name: Install Pareto locally
         working-directory: ../
-        run: git clone https://github.com/project-pareto/project-pareto.git && cd project-pareto && git fetch --all --tags && git checkout 0.9.0rc0 && pip install --progress-bar off .
+        run: git clone https://github.com/project-pareto/project-pareto.git && cd project-pareto && pip install --progress-bar off .
 
       - name: Install numpy 1.24.3
         run: |
@@ -69,7 +73,7 @@ jobs:
 
       - name: Sign Windows Distribution
         run: |
-          AzureSignTool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v electron/dist/ParetoUI-23.10.06-win64.exe
+          AzureSignTool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v electron/dist/ParetoUI-23.10.25-win64.exe
 
       - name: Upload artifact for windows build
         uses: actions/upload-artifact@v3
@@ -77,7 +81,7 @@ jobs:
         with:
             name: windows-pareto-dist
             path: |
-              electron/dist/ParetoUI-23.10.06-win64.exe
+              electron/dist/ParetoUI-23.10.25-win64.exe
   # windows-build:
   #   name: Windows Build
 
@@ -126,4 +130,4 @@ jobs:
   #       with:
   #           name: windows-pareto-dist
   #           path: |
-  #             electron/dist/ParetoUI-23.10.06-win64.exe
+  #             electron/dist/ParetoUI-23.10.25-win64.exe

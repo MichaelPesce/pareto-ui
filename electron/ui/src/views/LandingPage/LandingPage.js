@@ -58,7 +58,7 @@ export default function LandingPage(props) {
                 <Grid item xs={3}> </Grid>
                 <Grid item xs={6}> 
                     <Box>
-                        <p style={{paddingTop:0, marginTop: 0, color:"#9c9c9c"}}>v23.10.06 (PARETO v0.9.0)</p>
+                        <p style={{paddingTop:0, marginTop: 0, color:"#9c9c9c"}}>v23.10.25 (PARETO v0.9.0)</p>
                     </Box>
                 </Grid>
                 <Grid item xs={3}> </Grid>
