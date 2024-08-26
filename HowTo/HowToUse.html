@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PARETO UI - How To</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            font-size: 18px;
+            word-spacing: 25%;
+            padding-bottom: 100px;
+            /* background-color: #f4f4f4; */
+        }
+
+        .header {
+            width: 100%;
+            height: 500px; /* Adjust the height as needed */
+            background-image: url('./img/background.jpg'); /* Replace with your actual image URL */
+            background-size: cover;
+            background-position: center;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            margin: 20px;
+        }
+
+        .left-sidebar, .right-sidebar {
+            flex: 1;
+            padding: 20px;
+            /* background-color: #e0e0e0; */
+            margin: 10px;
+            border-radius: 5px;
+        }
+
+        .main-content {
+            flex: 3;
+            padding: 20px;
+            background-color: #fff;
+            margin: 10px;
+            border-radius: 5px;
+            /* text-align: center; */
+            /* width: 75vw; */
+        }
+
+        .text-header {
+            font-weight: bold;
+            /* text-align: center; */
+        }
+
+        .step-by-step-content {
+            padding-top: 20px;
+        }
+
+        .screenshot-div {
+            width: 100%;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .screenshot {
+            max-width: 75%;
+            box-shadow: 0px 5px 10px 0px rgba(0, 0, 0, 0.5);
+        }
+
+        .footer {
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 10px;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <!-- Header section for the picture -->
+    </div>
+
+    <div class="container">
+        <div class="left-sidebar">
+        </div>
+        
+        <div class="main-content">
+
+            <h1 class="text-header">PARETO User Interface</h1>
+            <h1 class="text-header">Step by step guide to using PARETO'S user interface.</h1>
+            <p> PARETO helps organizations better manage, better treat, and - where possible - beneficially reuse produced water from oil and gas operations.
+            </p>
+            <div class="step-by-step-content">
+                <p>
+                    <b>Step 1:</b> 
+                    Download the latest version of PARETO for your operating system at <u>https://www.project-pareto.org/software/</u>.
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/software-website.png" alt="software-website">
+                </div>
+
+                <p>
+                    <b>Step 2:</b> 
+                    Follow the installation steps to install the application. For windows, see below:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/windows-installer.png" alt="windows-installer">
+                </div>
+
+                <p>
+                    <b>Step 3:</b> 
+                    Run the application, you should see a splash page before being redirected to the scenarios page:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/scenarios-page.png" alt="scenarios-page">
+                </div>
+
+                <p>
+                    <b>Step 4:</b> 
+                    Click on "Create new scenario". Download from one of the available sample inputs, name the scenario, and click "Create scenario":
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/create-scenario.png" alt="create-scenario">
+                </div>
+
+                <p>
+                    <b>Step 5:</b> 
+                    Browse the input plots and tables, with the option to edit any of the inputs:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/input-page.png" alt="input-page">
+                </div>
+
+                <p>
+                    <b>Step 6:</b> 
+                    Click the "optimization setup" button, and choose from our model settings. If you have a gurobi license, select "gurobi" from the solver options:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/model-settings.png" alt="model-settings">
+                </div>
+
+                <p>
+                    <b>Step 7:</b> 
+                    Click "run model":
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/running-model.png" alt="running-model">
+                </div>
+
+                <p>
+                    <b>Step 8:</b> :
+                    When the model is finished running, the KPI dashboard will be visible from the "model output" section:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/kpi-dashboard.png" alt="kpi-dashboard.">
+                </div>
+
+                <p>
+                    <b>Step 9:</b> 
+                    Analyze the output by looking through tables and graphs, including the sankey diagram that interactively displays the distribution of produced water:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/sankey-diagram.png" alt="sankey-diagram">
+                </div>
+
+                <p>
+                    <b>Step 10:</b> 
+                    If you are unhappy with any of PARETO's infrastructure decisions, feel free to override with your own decisions in the "infrastructure buildout" tab:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/infrastructure-override.png" alt="infrastructure-override">
+                </div>
+
+                <p>
+                    <b>Step 11:</b> 
+                    Compare different scenarios by clicking on any of the compare icons from the scenario page:
+                </p>
+                <div class="screenshot-div">
+                    <img class="screenshot" src="./img/scenario-comparison.png" alt="scenario-comparison">
+                </div>
+            </div>
+            
+        </div>
+
+        <div class="right-sidebar">
+        </div>
+    </div>
+
+    <div class="footer">
+        &copy; 2024 Project PARETO Example. All rights reserved.
+    </div>
+
+</body>
+</html>
