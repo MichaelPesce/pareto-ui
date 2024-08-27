@@ -1,10 +1,15 @@
-========================
+=========================
 How To Use User Interface
-========================
+=========================
+
+.. _how-to-use-ui-page:
+
+Step-by-step guide
+------------------
 
 .. container::
 
-   .. container:: main-content
+   .. container:: how-to-use-ui-content
 
       .. rubric:: PARETO User Interface
          :name: pareto-user-interface
@@ -13,10 +18,6 @@ How To Use User Interface
       .. rubric:: Step by step guide to using PARETO'S user interface.
          :name: step-by-step-guide-to-using-paretos-user-interface.
          :class: text-header
-
-      PARETO helps organizations better manage, better treat, and -
-      where possible - beneficially reuse produced water from oil and
-      gas operations.
 
       .. container:: step-by-step-content
 
