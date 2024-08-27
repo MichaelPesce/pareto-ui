@@ -1,10 +1,10 @@
 ========================
-PARETO UI - How To Guide
+How To Use User Interface
 ========================
 
 .. container::
 
-   .. container:: left-sidebar
+
 
    .. container:: main-content
 
@@ -102,7 +102,7 @@ PARETO UI - How To Guide
 
             |scenario-comparison|
 
-   .. container:: right-sidebar
+
 
 .. container:: footer
 
