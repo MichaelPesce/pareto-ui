@@ -4,8 +4,6 @@ How To Use User Interface
 
 .. container::
 
-
-
    .. container:: main-content
 
       .. rubric:: PARETO User Interface
@@ -101,7 +99,6 @@ How To Use User Interface
          .. container:: screenshot-div
 
             |scenario-comparison|
-
 
 
 .. container:: footer

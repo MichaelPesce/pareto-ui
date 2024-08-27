@@ -5,3 +5,4 @@ How To Guides
    :maxdepth: 1
 
    how_to_use_interface
+   how_to_deploy_ui

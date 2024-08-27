@@ -24,6 +24,7 @@ Content
 .. toctree::
    :maxdepth: 2
 
+   getting_started
    how_to_guides/index
    citing
    license

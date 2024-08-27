@@ -10,7 +10,7 @@ project = "PARETO UI"
 # copyright = ""
 # author = ""
 
-release = "1.0.0"
+release = "24.08.13"
 version = "1.0.0"
 # -- General configuration ---------------------------------------------------
 
