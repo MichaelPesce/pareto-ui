@@ -9,7 +9,7 @@ Step-by-step guide
 
 .. container::
 
-   .. container:: how-to-use-ui-content
+   .. container::
 
       .. rubric:: PARETO User Interface
          :name: pareto-user-interface
@@ -19,7 +19,7 @@ Step-by-step guide
          :name: step-by-step-guide-to-using-paretos-user-interface.
          :class: text-header
 
-      .. container:: step-by-step-content
+      .. container::
 
          **Step 1:** Download the latest version of PARETO for your
          operating system at *https://www.project-pareto.org/software/*.
@@ -39,7 +39,7 @@ Step-by-step guide
          before being redirected to the scenarios page:
 
          .. container:: screenshot-div
-
+            
             |scenarios-page|
 
          **Step 4:** Click on "Create new scenario". Download from one

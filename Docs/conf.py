@@ -36,7 +36,7 @@ autosectionlabel_prefix_document = True
 autodoc_warningiserror = False  # suppress warnings during autodoc
 
 # Add any paths that contain templates here, relative to this directory.
-# templates_path = ["_templates"]
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -54,7 +54,7 @@ html_theme = "sphinx_rtd_theme"
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["_static/css/how_to_use_interface.css"]
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
@@ -77,3 +77,6 @@ rst_epilog = """
 .. |Binder launch button| image:: https://mybinder.org/badge_logo.svg
    :target: https://mybinder.org/v2/gh/watertap-org/watertap/main?labpath=tutorials%2F00-index.ipynb
 """
+
+def setup(app):
+  app.add_css_file("css/how_to_use_interface.css" )
