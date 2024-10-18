@@ -17,6 +17,7 @@ export default function FileUploadModal(props) {
     const [ scenarioName, setScenarioName ] = useState("")
     const [ showWarning, setShowWarning ] = useState(false)
     const [ warningMessage, setWarningMessage ] = useState("")
+    const [ modelType, setModelType ] = useState("strategic")
     const [ file, setFile ] = useState(null)
     const fileTypes = ["xlsx", "kmz", "kml"];
     const PARETO_VERSION = "main"
@@ -27,11 +28,6 @@ export default function FileUploadModal(props) {
 
   const { port } = useApp()
 
-
-  useEffect(()=>{
-    console.log('fileuploadmodal props: ')
-    console.log(props)
-  }, [props]);
 
    const styles = {
     modalStyle: {
@@ -115,8 +111,7 @@ export default function FileUploadModal(props) {
             setShowWarning(false)
           }, 5000)
     }else {
-        console.log('valid file entry')
-        props.handleFileUpload(file, scenarioName)
+        props.handleFileUpload(file, scenarioName, modelType)
         setShowWarning(false)
         props.setShowFileModal(false)
     }
@@ -152,6 +147,10 @@ export default function FileUploadModal(props) {
    function DragDrop() {
     const handleChange = (file) => {
         console.log('setting file: '+file.name)
+        if (file.name.toLowerCase().includes("operational")) {
+            console.log("setting model type to operational")
+            setModelType("operational")
+        }
       setFile(file);
     };
     return (
