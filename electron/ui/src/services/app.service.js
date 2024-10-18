@@ -97,8 +97,9 @@ export const copyScenario = (backend_port, id, newScenarioName) => {
     });
 };
 
-export const uploadExcelSheet = (backend_port, data, name) => {
-    return fetch(BACKEND_URL+':'+backend_port+'/upload/'+name, {
+export const uploadExcelSheet = (backend_port, data, name, model_type) => {
+    if (!model_type) model_type = "strategic"
+    return fetch(BACKEND_URL+':'+backend_port+'/upload/'+name+'/'+model_type, {
         method: 'POST', 
         mode: 'cors',
         body: data

@@ -199,10 +199,10 @@ class ScenarioHandler:
 
         return updatedScenario
     
-    def upload_excelsheet(self, output_path, scenarioName, filename, kmz_data=None):
+    def upload_excelsheet(self, output_path, scenarioName, filename, model_type="strategic", kmz_data=None):
         _log.info(f"Uploading excel sheet: {scenarioName}")
 
-        [set_list, parameter_list] = get_input_lists()
+        [set_list, parameter_list] = get_input_lists(model_type)
 
         # read in data from uploaded excel sheet
         [df_sets, df_parameters, frontend_parameters] = get_data(output_path, set_list, parameter_list)
@@ -244,6 +244,7 @@ class ScenarioHandler:
             "name": scenarioName, 
             "id": self.next_id, 
             "date": date,
+            "model_type": model_type,
             "data_input": {"df_sets": df_sets, "df_parameters": frontend_parameters, 'display_units': display_units, "map_data": kmz_data}, 
             "optimization": 
                 {
@@ -289,10 +290,10 @@ class ScenarioHandler:
         
         return return_object
     
-    def replace_excelsheet(self, output_path, id):
+    def replace_excelsheet(self, output_path, id, model_type="strategic"):
         _log.info(f"replacing excel sheet for id: {id}")
 
-        [set_list, parameter_list] = get_input_lists()
+        [set_list, parameter_list] = get_input_lists(model_type)
 
         # read in data from uploaded excel sheet
         [df_sets, df_parameters, frontend_parameters] = get_data(output_path, set_list, parameter_list)
