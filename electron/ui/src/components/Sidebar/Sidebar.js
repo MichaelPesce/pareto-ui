@@ -28,7 +28,7 @@ export default function Sidebar(props) {
   const [ openStatic, setOpenStatic ] = useState(false)
   const [ openResultsTables, setOpenResultsTables ] = useState(false)
   const [ overrideList, setOverrideList ] = useState([])
-  const Subcategories = SUBCATEGORIES[modelType || 'strategic']
+  const [ Subcategories, setSubCategories ] = useState(SUBCATEGORIES[modelType || 'strategic'])
 
   useEffect(() => {
     let tempOverrideList = []
@@ -41,6 +41,10 @@ export default function Sidebar(props) {
     }
     if (tempOverrideList.length > 0) tempOverrideList.push("Results Tables")
     setOverrideList(tempOverrideList)
+    let newSubCategories = SUBCATEGORIES[modelType || 'strategic']
+    console.log("setting subcategories to")
+    console.log(newSubCategories)
+    setSubCategories(newSubCategories)
 },[scenario])
 
   const handleOpenSaveModal = () => setOpenSaveModal(true);

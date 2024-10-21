@@ -23,24 +23,13 @@
     },
     "operational": {
         "Dynamic": [
-            "CompletionsDemand","DisposalOperationalCost","TreatmentOperationalCost","CompletionsPadOutsideSystem",
-            "DesalinationTechnologies","DesalinationSites","TruckingTime","PadRates","FlowbackRates","NodeCapacities",
-            "InitialPipelineCapacity","InitialPipelineDiameters", "InitialDisposalCapacity","InitialTreatmentCapacity","ExtWaterSourcingAvailability",
+            "CompletionsDemand","DisposalOperationalCost","TruckingTime","PadRates","FlowbackRates","ExtWaterSourcingAvailability",
             "PadOffloadingCapacity","CompletionsPadStorage","ReuseOperationalCost","PipelineOperationalCost",
-            "ExternalSourcingCost","TruckingHourlyCost","PipelineDiameterValues","DisposalCapacityIncrements",
-            "InitialStorageCapacity","StorageCapacityIncrements","TreatmentCapacityIncrements","TreatmentEfficiency",
-            "DisposalExpansionCost","StorageExpansionCost","TreatmentExpansionCost","PipelineCapexDistanceBased",
-            "PipelineCapexCapacityBased","PipelineCapacityIncrements","PipelineExpansionDistance","WellPressure", "Hydraulics","Elevation",
-            "Economics","PadWaterQuality","StorageInitialWaterQuality","PadStorageInitialWaterQuality","DisposalOperatingCapacity", "RemovalEfficiency",
-            "ReuseCapacity", "ReuseMinimum", "BeneficialReuseCost", "BeneficialReuseCredit", "TreatmentExpansionLeadTime", "DisposalExpansionLeadTime", 
-            "StorageExpansionLeadTime", "PipelineExpansionLeadTime_Dist", "PipelineExpansionLeadTime_Capac", "ExternalWaterQuality", "SWDDeep",
-            "SWDAveragePressure", "SWDProxPAWell", "SWDProxInactiveWell", "SWDProxEQ", "SWDProxFault", "SWDProxHpOrLpWell", "SWDRiskFactors",
-            "AirEmissionCoefficients", "TreatmentEmissionCoefficients", "DesalinationSurrogate"
+            "ExternalSourcingCost","TruckingHourlyCost","TreatmentEfficiency","PadWaterQuality","ExternalWaterQuality",
+            "TankFlowbackRates", "ProductionRates", "DisposalCapacity", "PadOffloadingCapacity", "PadStorageCost"
         ],
         "Static": [
-            "PNA", "CNA", "CCA", "NNA", "NCA", "NKA", "NRA", "NSA", "FCA", "RCA", "RNA", "RSA",
-            "SCA", "SNA", "ROA", "RKA", "SOA", "NOA", "PCT", "PKT", "FCT", "CST", "CCT", "CKT",
-            "RST", "ROT", "SOT", "RKT"
+            "FCA", "RCA", "PCT", "PKT", "FCT", "CCT", "CKT", "PAL"
         ]
     }
 }
