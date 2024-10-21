@@ -211,7 +211,6 @@ def handle_run_operational_model(input_file, output_file, id, modelParameters, o
             _log.error('unable to add infrastructure rows back in')
         
 
-
         if results['terminationCondition'] == "infeasible":
             results['status'] = 'Infeasible'
         else:

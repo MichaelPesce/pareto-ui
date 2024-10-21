@@ -19,7 +19,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 import logging
 import idaes.logger as idaeslog
 
-from app.internal.pareto_stategic_model import run_strategic_model, handle_run_strategic_model
+from app.internal.pareto_stategic_model import handle_run_strategic_model
+from app.internal.pareto_operational_model import handle_run_operational_model
 from app.internal.scenario_handler import (
     scenario_handler,
 )
@@ -191,14 +192,28 @@ async def run_model(request: Request, background_tasks: BackgroundTasks):
             _log.error(f'unable to find override values')
             overrideValues = {}
 
-        background_tasks.add_task(
-            handle_run_strategic_model, 
-            input_file=excel_path,
-            output_file=output_path,
-            id=data['scenario']['id'],
-            modelParameters=modelParameters,
-            overrideValues=overrideValues
-        )
+        model_type = data['scenario'].get("model_type", "strategic") == "strategic"
+        if model_type == "strategic":
+            print("RUNNING STRATEGIC MODEL BOII")
+            background_tasks.add_task(
+                handle_run_strategic_model, 
+                input_file=excel_path,
+                output_file=output_path,
+                id=data['scenario']['id'],
+                modelParameters=modelParameters,
+                overrideValues=overrideValues
+            )
+        elif model_type == "operational":
+            print("RUNNING OPERATIONAL MODEL BOII")
+            background_tasks.add_task(
+                handle_run_operational_model, 
+                input_file=excel_path,
+                output_file=output_path,
+                id=data['scenario']['id'],
+                modelParameters=modelParameters,
+                # overrideValues=overrideValues
+            )
+
         
         # add id to scenario handler task list to keep track of running tasks
         scenario_handler.add_background_task(data['scenario']['id'])
