@@ -42,8 +42,6 @@ export default function Sidebar(props) {
     if (tempOverrideList.length > 0) tempOverrideList.push("Results Tables")
     setOverrideList(tempOverrideList)
     let newSubCategories = SUBCATEGORIES[modelType || 'strategic']
-    console.log("setting subcategories to")
-    console.log(newSubCategories)
     setSubCategories(newSubCategories)
 },[scenario])
 
