@@ -192,7 +192,7 @@ async def run_model(request: Request, background_tasks: BackgroundTasks):
             _log.error(f'unable to find override values')
             overrideValues = {}
 
-        model_type = data['scenario'].get("model_type", "strategic") == "strategic"
+        model_type = data['scenario'].get("model_type", "strategic")
         if model_type == "strategic":
             print("RUNNING STRATEGIC MODEL BOII")
             background_tasks.add_task(

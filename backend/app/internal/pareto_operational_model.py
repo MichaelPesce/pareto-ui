@@ -52,6 +52,10 @@ def run_operational_model(input_file, output_file, id, modelParameters, override
     _log.info(f"getting data from excel sheet")
     [df_sets, df_parameters] = get_data(input_file, set_list, parameter_list)
 
+    # Additional input data
+    df_parameters["MinTruckFlow"] = 0  # barrels/day
+    df_parameters["MaxTruckFlow"] = 259000  # barrels/day
+
     _log.info(f"creating model")
 
     default={
@@ -62,9 +66,9 @@ def run_operational_model(input_file, output_file, id, modelParameters, override
     operational_model = create_model(
         df_sets,
         df_parameters,
-        default=default
+        default=default,
     )
-    
+    _log.info("created model")
     scenario = scenario_handler.get_scenario(int(id))
     results = {"data": {}, "status": "Solving model"}
     scenario["results"] = results

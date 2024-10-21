@@ -201,7 +201,6 @@ class ScenarioHandler:
     
     def upload_excelsheet(self, output_path, scenarioName, filename, model_type="strategic", kmz_data=None):
         _log.info(f"Uploading excel sheet: {scenarioName}")
-
         [set_list, parameter_list] = get_input_lists(model_type)
 
         # read in data from uploaded excel sheet
