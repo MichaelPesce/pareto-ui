@@ -108,13 +108,12 @@ export default function ScenarioList(props) {
         setId(null)
     }
 
-    const handleFileUpload = (file, name) => {
-        console.log('handle file upload')
-        console.log('creating scenario with name '+name)
+    const handleFileUpload = (file, name, model_type) => {
+        if (!model_type) model_type = "strategic"
         const formData = new FormData();
         formData.append('file', file, file.name);
 
-        uploadExcelSheet(port, formData, name)
+        uploadExcelSheet(port, formData, name, model_type)
         .then(response => {
         if (response.status === 200) {
             response.json()
