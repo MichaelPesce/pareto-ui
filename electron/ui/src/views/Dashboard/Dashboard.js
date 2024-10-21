@@ -15,7 +15,26 @@ import { runModel } from '../../services/app.service'
 import { useApp } from '../../AppContext';
 
 export default function Dashboard(props) {
-  const scenario = props.scenario
+  const { 
+    scenario, 
+    navigateHome, 
+    updateScenario, 
+    updateAppState, 
+    addTask, 
+    handleEditScenarioName, 
+    handleSetSection,
+    section, 
+    category,
+    handleUpdateExcel,
+    syncScenarioData,
+    backgroundTasks,
+    copyAndRunOptimization,
+    appState,
+    scenarios,
+    handleSetCategory,
+    modelType
+  } = props
+
   const [ name, setName ] = useState('')
   const [ openEditName, setOpenEditName ] = useState(false)
   // const [ openSaveChanges, setOpenSaveChanges ] = useState(false)
@@ -30,7 +49,7 @@ export default function Dashboard(props) {
   useEffect(()=>{
     try {
       if(!scenario) {
-        props.navigateHome()
+        navigateHome()
       }
       setInputDataEdited(false)
       setName(scenario.name)
@@ -62,9 +81,9 @@ export default function Dashboard(props) {
         let responseCode = response.status
         let data = response.body
         if(responseCode === 200) {
-          props.updateScenario(data)
-          props.updateAppState({action:'section',section:2},scenario.id)
-          props.addTask(scenario.id)
+          updateScenario(data)
+          updateAppState({action:'section',section:2, category: category},scenario.id)
+          addTask(scenario.id)
         }
         else if(responseCode === 500) {
           console.error('error on model run: ',data.detail)
@@ -80,38 +99,39 @@ export default function Dashboard(props) {
    }
 
    const handleSaveName = () => {
-    props.handleEditScenarioName(name, scenario.id, true)
+    handleEditScenarioName(name, scenario.id, true)
     setOpenEditName(false)
   }
   
   return (
     <>
       <ProcessToolbar 
-        handleSelection={props.handleSetSection} 
-        selected={props.section} 
+        handleSelection={handleSetSection} 
+        selected={section} 
         scenario={scenario}
-        category={props.category} 
+        category={category} 
         inputDataEdited={inputDataEdited}
-        handleUpdateExcel={props.handleUpdateExcel}
+        handleUpdateExcel={handleUpdateExcel}
         setInputDataEdited={setInputDataEdited}
-        syncScenarioData={props.syncScenarioData}
+        syncScenarioData={syncScenarioData}
       >
       </ProcessToolbar>
-      {(props.section === 0 || (props.section === 2 && scenario.results.status.includes("Optimized"))) && 
+      {(section === 0 || (section === 2 && scenario.results.status.includes("Optimized"))) && 
         <Sidebar 
-          handleSetCategory={props.handleSetCategory} 
+          handleSetCategory={handleSetCategory} 
           scenario={scenario} 
-          section={props.section} 
-          category={props.category} 
+          section={section} 
+          category={category} 
           inputDataEdited={inputDataEdited}
-          handleUpdateExcel={props.handleUpdateExcel}
+          handleUpdateExcel={handleUpdateExcel}
           setInputDataEdited={setInputDataEdited}
-          syncScenarioData={props.syncScenarioData}
+          syncScenarioData={syncScenarioData}
+          modelType={modelType}
           >
         </Sidebar>
       }
       
-    <Grid container spacing={1} sx={(props.section !== 1 && !(props.section === 2 && !scenario.results.status.includes("Optimized"))) ? styles.shiftTextRight : {}}>
+    <Grid container spacing={1} sx={(section !== 1 && !(section === 2 && !scenario.results.status.includes("Optimized"))) ? styles.shiftTextRight : {}}>
       <Grid item xs={4} ></Grid>
       <PopupModal
         input
@@ -129,7 +149,7 @@ export default function Dashboard(props) {
       <Grid item xs={4}>
       <div>
         <b id='scenarioTitle' >
-        {(scenario && props.section===0) && 
+        {(scenario && section===0) && 
         <p>{scenario.name}
         <IconButton onClick={handleOpenEditName} style={{fontSize:"15px", zIndex:'0'}} disabled={enabledStatusList.includes(scenario.results.status) ? false : true}>
           <EditIcon fontSize='inherit'/>
@@ -142,56 +162,56 @@ export default function Dashboard(props) {
       <Grid item xs={4}>
       </Grid>
       <Grid item xs={12}>
-      {(scenario && props.section===0) &&
+      {(scenario && section===0) &&
         <DataInput 
-          handleUpdateExcel={props.handleUpdateExcel} 
-          category={props.category} 
+          handleUpdateExcel={handleUpdateExcel} 
+          category={category} 
           scenario={scenario} 
           edited={inputDataEdited} 
           handleEditInput={setInputDataEdited}
-          syncScenarioData={props.syncScenarioData}
-          handleSetCategory={props.handleSetCategory} 
-          updateScenario={props.updateScenario}
+          syncScenarioData={syncScenarioData}
+          handleSetCategory={handleSetCategory} 
+          updateScenario={updateScenario}
         />
       }
-      {(scenario && props.section===1) && 
+      {(scenario && section===1) && 
         <Optimization 
-          category={props.category} 
+          category={category} 
           scenario={scenario} 
-          updateScenario={props.updateScenario}
+          updateScenario={updateScenario}
           handleRunModel={handleRunModel}
-          backgroundTasks={props.backgroundTasks} 
+          backgroundTasks={backgroundTasks} 
           disabled={disableOptimize}
           setDisabled={setDisableOptimize}
         />
       }
-      {(scenario && props.section===2) && 
+      {(scenario && section===2) && 
         <ModelResults 
-          category={props.category} 
+          category={category} 
           scenario={scenario} 
-          handleSetSection={props.handleSetSection} 
-          appState={props.appState}
-          syncScenarioData={props.syncScenarioData}
-          scenarios={props.scenarios}
-          updateScenario={props.updateScenario}
+          handleSetSection={handleSetSection} 
+          appState={appState}
+          syncScenarioData={syncScenarioData}
+          scenarios={scenarios}
+          updateScenario={updateScenario}
         />
       }
       </Grid>
     </Grid>
     <Bottombar 
-      handleSelection={props.handleSetSection} 
-      section={props.section} 
-      backgroundTasks={props.backgroundTasks} 
+      handleSelection={handleSetSection} 
+      section={section} 
+      backgroundTasks={backgroundTasks} 
       scenario={scenario} 
-      category={props.category}
-      handleUpdateExcel={props.handleUpdateExcel}
+      category={category}
+      handleUpdateExcel={handleUpdateExcel}
       inputDataEdited={inputDataEdited}
       setInputDataEdited={setInputDataEdited}
-      syncScenarioData={props.syncScenarioData}
+      syncScenarioData={syncScenarioData}
       handleRunModel={handleRunModel}
       disableOptimize={disableOptimize}
       setDisableOptimize={setDisableOptimize}
-      copyAndRunOptimization={props.copyAndRunOptimization}
+      copyAndRunOptimization={copyAndRunOptimization}
       />
     </>
   );

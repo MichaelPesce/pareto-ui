@@ -4,7 +4,7 @@ import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import ParetoDictionary from '../../assets/ParetoDictionary.json'
 import CategoryNames from '../../assets/CategoryNames.json'
-import Subcategories from '../../assets/Subcategories.json'
+import SUBCATEGORIES from '../../assets/Subcategories.json'
 import { OVERRIDE_CATEGORIES }  from '../../assets/InfrastructureCapexMapping'
 
 
@@ -12,7 +12,7 @@ const drawerWidth = 240;
 
 
 export default function Sidebar(props) {
-    const { category, setCategory, open, deltaDictionary, overrides, compareScenarioIndexes } = props
+    const { category, setCategory, open, deltaDictionary, overrides, compareScenarioIndexes, modelType } = props
     const [ openOutputs, setOpenOutputs ] = useState(true)
     const [ openDynamic, setOpenDynamic ] = useState(false)
     const [ openStatic, setOpenStatic ] = useState(false)
@@ -20,6 +20,7 @@ export default function Sidebar(props) {
     const [ deltaCategories, setDeltaCategories ] = useState([])
     const [ hasOverrides, setHasOverrides ] = useState(false)
     const [ overridesList, setOverridesList ] = useState([[],[]])
+    const Subcategories = SUBCATEGORIES[modelType || 'strategic']
 
     useEffect(() => {
       // check if delta dictionary is set yet

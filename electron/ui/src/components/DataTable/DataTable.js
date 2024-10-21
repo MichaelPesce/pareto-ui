@@ -14,7 +14,6 @@ export default function DataTable(props) {
 
   useEffect(()=>{
     if(props.scenario.override_values === undefined) {
-      console.log('override values were not defined')
       let tempOverrideValues = {}
       for (let each of props.OVERRIDE_CATEGORIES) {
         if (!Object.keys(tempOverrideValues).includes(each)) tempOverrideValues[each] = {}

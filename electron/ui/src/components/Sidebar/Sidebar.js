@@ -4,7 +4,7 @@ import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import ParetoDictionary from '../../assets/ParetoDictionary.json'
 import CategoryNames from '../../assets/CategoryNames.json'
-import Subcategories from '../../assets/Subcategories.json'
+import SUBCATEGORIES from '../../assets/Subcategories.json'
 import PopupModal from '../../components/PopupModal/PopupModal'
 
 
@@ -20,6 +20,7 @@ export default function Sidebar(props) {
     handleUpdateExcel,
     setInputDataEdited,
     syncScenarioData,
+    modelType
   } = props
   const [ openSaveModal, setOpenSaveModal ] = useState(false)
   const [ key, setKey ] =  useState(null)
@@ -27,6 +28,7 @@ export default function Sidebar(props) {
   const [ openStatic, setOpenStatic ] = useState(false)
   const [ openResultsTables, setOpenResultsTables ] = useState(false)
   const [ overrideList, setOverrideList ] = useState([])
+  const Subcategories = SUBCATEGORIES[modelType || 'strategic']
 
   useEffect(() => {
     let tempOverrideList = []

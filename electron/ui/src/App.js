@@ -31,6 +31,7 @@ function App() {
   const [ showCompletedOptimization, setShowCompletedOptimization ] = useState(false)
   const [ lastCompletedScenario, setLastCompletedScenario ] = useState(null)
   const [ compareScenarioIndexes, setCompareScenarioIndexes ] = useState([])
+  const [ modelType, setModelType ] = useState("")
   const INITIAL_STATES = ['Draft','Incomplete']
   const RUNNING_STATES = ['Initializing', 'Solving Model','Generating Output']
   const STABLE_STATES = ['Draft','none', 'Optimized','failure', 'Not Optimized', 'complete', 'Infeasible']
@@ -54,8 +55,6 @@ function App() {
       fetchScenarios(port)
       .then(response => response.json())
       .then((data)=>{
-        // console.log('loaded landing page on try #'+loadLandingPage)
-        // console.log('setscenarios: ',data.data)
         /* 
         check for any scenarios that were running when the app was previously quit
         reset the status of these scenarios so that they can be treated as drafts again
@@ -69,7 +68,7 @@ function App() {
               updateScenario(port, {'updatedScenario': {...scenario}})
               .then(response => response.json())
               .then((data) => {
-                console.log('reset scenario')
+                // console.log('reset scenario')
               }).catch(e => {
                 console.error('error on scenario update')
                 console.error(e)
@@ -99,7 +98,6 @@ useEffect(()=> {
   /*
     make api call to get status of each running task
   */
-//  console.log('checking model results')
   fetchScenarios(port)
     .then(response => response.json())
     .then((data)=>{
@@ -123,7 +121,7 @@ useEffect(()=> {
             set scenarios and scenario data; keep checking
           */
             if(""+scenarioIndex === ""+backgroundTasks[0]) {
-              setScenarioData(tempScenarios[backgroundTasks[0]])
+              updateScenarioData(tempScenarios[backgroundTasks[0]])
             }
             setScenarios(tempScenarios)
             if(checkModelResults < 1000) {
@@ -148,6 +146,20 @@ useEffect(()=> {
  }
 }, [checkModelResults])
 
+const updateScenarioData = (newData) => {
+  if (newData) {
+    let newModelType = newData.model_type || "strategic"
+    if (newModelType !== modelType) {
+      // console.log("new model type is "+newModelType)
+      setModelType(newModelType)
+      if (appState) {
+        updateAppState({action:'category',category:"Input Summary", section: 0},scenarioIndex)
+      }
+    }
+  }
+  setScenarioData(newData)
+}
+
   const handleCompletedOptimization = (newScenarios, id) => {
     setCheckModelResults(0)
     setScenarios(newScenarios)
@@ -160,7 +172,7 @@ useEffect(()=> {
       if not on model results tab, show popup that lets user know that model has finished running
     */
    if(""+id === ""+scenarioIndex){
-    setScenarioData(newScenarios[id])
+    updateScenarioData(newScenarios[id])
     if (section === 2) {
       handleSetCategory("Dashboard")
      }
@@ -174,12 +186,11 @@ useEffect(()=> {
     handleSetSection(2)
     // handleSetCategory("Dashboard")
     setShowCompletedOptimization(false)
-    setScenarioData(scenarios[lastCompletedScenario]);
+    updateScenarioData(scenarios[lastCompletedScenario]);
     setScenarioIndex(lastCompletedScenario)
   }
 
   const handleCloseFinishedOptimizationDialog = () => {
-    // console.log('inside handleCloseFinishedOptimizationDialog')
     setShowCompletedOptimization(false)
   }
 
@@ -188,14 +199,13 @@ useEffect(()=> {
       function for returning to scenario list and resetting scenario data
     */   
     setShowHeader(true)
-    setScenarioData(null)
+    updateScenarioData(null)
     setSection(0)
     setCategory(null)
     setScenarioIndex(null)
     fetchScenarios(port)
     .then(response => response.json())
     .then((data)=>{
-      console.log('setscenarios: ',data.data)
       setScenarios(data.data)
     });
     navigate('/scenarios', {replace: true})
@@ -203,7 +213,7 @@ useEffect(()=> {
 
   const handleScenarioSelection = (scenario) => {
     navigate('/scenario', {replace: true})
-    setScenarioData(scenarios[scenario]);
+    updateScenarioData(scenarios[scenario]);
     setScenarioIndex(scenario)
     updateAppState({action: 'select'}, scenario)
 
@@ -215,24 +225,19 @@ useEffect(()=> {
     setShowHeader(true)
     setScenarios(temp)
     setScenarioIndex(data.id)
-    setScenarioData(data)
+    updateScenarioData(data)
     updateAppState({action:'new'}, data.id)
     navigate('/scenario', {replace: true})   
   }
 
   const handleScenarioUpdate = (updatedScenario, keepOptimized) => {
-    // console.log('inside handle scenario update')
     if (updatedScenario.results.status==='Optimized' && !keepOptimized) {
-      // console.log('changing status to not optimized')
       updatedScenario.results.status = "Not Optimized"
     }
     const temp = {...scenarios}
     temp[scenarioIndex] = {...updatedScenario}
-    console.log('updating scenario: ',updatedScenario)
     setScenarios(temp)
-    setScenarioData({...updatedScenario})
-    // console.log('new scenario: ')
-    // console.log({...updatedScenario})
+    updateScenarioData({...updatedScenario})
     updateScenario(port, {'updatedScenario': {...updatedScenario}})
     .then(response => response.json())
     .then((data) => {
@@ -247,14 +252,14 @@ useEffect(()=> {
     set process section (input, optimization, results)
   */
   const handleSetSection = (section) => {
-    updateAppState({action:'section',section:section},scenarioIndex)
+    updateAppState({action:'section',section:section, category: category},scenarioIndex)
  }
 
  /*
   set sidebar category
  */
  const handleSetCategory = (category) => {
-  updateAppState({action:'category',category:category},scenarioIndex)
+  updateAppState({action:'category',category:category, section: section},scenarioIndex)
  }
 
   const handleEditScenarioName = (newName, id, updateScenarioData) => {
@@ -264,7 +269,7 @@ useEffect(()=> {
     tempScenarios[id] = tempScenario
     setScenarios(tempScenarios)
     if (updateScenarioData) {
-      setScenarioData(tempScenario)
+      updateScenarioData(tempScenario)
     }
     updateScenario(port, {'updatedScenario': tempScenario})
     .then(response => response.json())
@@ -277,7 +282,6 @@ useEffect(()=> {
   }
 
   const handleDeleteScenario = (index) => {
-    // console.log('deleting scenario: ',index)
     deleteScenario(port, {'id': index})
     .then(response => response.json())
     .then((data) => {
@@ -296,8 +300,6 @@ useEffect(()=> {
     updateExcel(port, {"id": id, "tableKey":tableKey, "updatedTable":updatedTable})
     .then(response => response.json())
     .then((data)=>{
-      // console.log('return from update excel: ')
-      // console.log(data)
       if (data.results.status === 'Optimized') {
         data.results.status = "Not Optimized"
         handleScenarioUpdate(data)
@@ -316,7 +318,7 @@ useEffect(()=> {
       .then(response => response.json())
       .then((data)=>{
         setScenarios(data.data)
-        setScenarioData(data.data[scenarioIndex])
+        updateScenarioData(data.data[scenarioIndex])
       });
   }
 
@@ -326,7 +328,6 @@ useEffect(()=> {
   const addTask = (id) => {
     let tempBackgroudTasks = [...backgroundTasks]
     tempBackgroudTasks.push(id)
-    // console.log('adding task!!!')
     setBackgroundTasks(tempBackgroudTasks)
     setCheckModelResults(checkModelResults+1)
   }
@@ -347,7 +348,6 @@ useEffect(()=> {
           tempCategory = appState.category
         }
       } else {
-        // console.log('in else')
         if(COMPLETED_STATES.includes(scenarios[index].results.status) || RUNNING_STATES.includes(scenarios[index].results.status)) {
           tempSection = 2
         } else {
@@ -374,7 +374,7 @@ useEffect(()=> {
       setCategory(tempState.category[action.section])
     }else if (action.action === 'category') {
       let tempState = {...appState}
-      tempState.category[section] = action.category
+      tempState.category[action.section] = action.category
       setAppState(tempState)
       setCategory(action.category)
     }
@@ -389,11 +389,9 @@ useEffect(()=> {
     .then(response => response.json())
     .then((copy_data) => {
       // update data
-      // console.log('setting scenarios with ')
-      // console.log(copy_data.scenarios)
       setScenarios(copy_data.scenarios)
       setScenarioIndex(copy_data.new_id)
-      setScenarioData(copy_data.scenarios[copy_data.new_id])
+      updateScenarioData(copy_data.scenarios[copy_data.new_id])
 
       // run model on new id
       runModel(port, {"scenario": copy_data.scenarios[copy_data.new_id]})
@@ -406,10 +404,8 @@ useEffect(()=> {
             updateScenario(port, {'updatedScenario': {...data}})
             .then(response => response.json())
             .then((updateScenario_data) => {
-              // console.log('returned from update scenario call')
-              updateAppState({action:'section',section:2},copy_data.new_id)
+              updateAppState({action:'section',section:2, category: category},copy_data.new_id)
               addTask(copy_data.new_id)
-              // console.log('updated scenarios on backend')
             }).catch(e => {
               console.error('error on scenario update')
               console.error(e)
@@ -486,6 +482,7 @@ useEffect(()=> {
               updateAppState={updateAppState}
               scenarios={scenarios}
               copyAndRunOptimization={copyAndRunOptimization}
+              modelType={modelType}
             />} 
         />
 
