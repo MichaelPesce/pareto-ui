@@ -48,7 +48,7 @@ export default function Dashboard(props) {
 
   useEffect(()=>{
     try {
-      if(!scenario) {
+      if(!scenario?.data_input) {
         navigateHome()
       }
       setInputDataEdited(false)
