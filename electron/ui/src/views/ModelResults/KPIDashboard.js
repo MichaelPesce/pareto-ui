@@ -165,7 +165,14 @@ export default function KPIDashboard(props) {
             <Grid item xs={12}>
                 <Box sx={{display: 'flex', justifyContent: 'center'}}>
                 <IconButton disabled><ChangeCircleIcon sx={{ color: "#947eaa" }}/></IconButton>
-                <p style={styles.kpiTitle}>Recycling Rate</p>
+                <p style={styles.kpiTitle}>
+                    {
+                        kpiData.e_CompletionsReusedFrac ? 
+                        "Recycling Rate"
+                        :
+                        "Reuse Amount"
+                    }
+                </p>
                 </Box>
             </Grid>
             <Grid item xs={12}>
@@ -174,7 +181,7 @@ export default function KPIDashboard(props) {
                     {
                         kpiData.e_CompletionsReusedFrac ? 
                         (
-                            Math.round(kpiData.e_CompletionsReusedFrac.value * 100) && Math.round(kpiData.e_CompletionsReusedFrac.unit)
+                            Math.round(kpiData.e_CompletionsReusedFrac.value * 100)+"%"
                         )
                         :
                         (
