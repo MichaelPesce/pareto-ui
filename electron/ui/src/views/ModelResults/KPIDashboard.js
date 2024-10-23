@@ -60,6 +60,7 @@ export default function KPIDashboard(props) {
         try {
             let tempData = {}
             // organize results dict data
+            console.log(props.overviewData)
             for (var index in props.overviewData) {
                 let item = props.overviewData[index]
                 let key = item[0]
@@ -68,6 +69,8 @@ export default function KPIDashboard(props) {
                 let value = item[3]
                 tempData[key] = {"description": description, "unit": unit, "value": value}
             }
+            console.log("kpi data")
+            console.log(tempData)
             setKpiData(tempData)
         } catch(e) {
             console.log("error setting kpi data:")
@@ -167,7 +170,18 @@ export default function KPIDashboard(props) {
             </Grid>
             <Grid item xs={12}>
                 <Box sx={{display: 'flex', justifyContent: 'center'}}>
-                <p style={styles.kpiValue}>{Math.round(kpiData.e_CompletionsReusedFrac?.value * 100)}%</p>
+                <p style={styles.kpiValue}>
+                    {
+                        kpiData.e_CompletionsReusedFrac ? 
+                        (
+                            Math.round(kpiData.e_CompletionsReusedFrac.value * 100) && Math.round(kpiData.e_CompletionsReusedFrac.unit)
+                        )
+                        :
+                        (
+                            kpiData.v_C_TotalReuse.value.toLocaleString('en-US', {maximumFractionDigits:0})+" "+kpiData.v_C_TotalReuse?.unit
+                        )
+                    }
+                </p>
                 </Box>
             </Grid>
             </Grid>
@@ -185,7 +199,14 @@ export default function KPIDashboard(props) {
             </Grid>
             <Grid item xs={12}>
                 <Box sx={{display: 'flex', justifyContent: 'center'}}>
-                <p style={styles.kpiValue}>{kpiData.v_F_TotalDisposed?.value.toLocaleString('en-US', {maximumFractionDigits:0})+" "+kpiData.v_F_TotalDisposed?.unit}</p>
+                <p style={styles.kpiValue}>
+                    {
+                        kpiData.v_F_TotalDisposed ? 
+                        kpiData.v_F_TotalDisposed.value.toLocaleString('en-US', {maximumFractionDigits:0})+" "+kpiData.v_F_TotalDisposed.unit
+                        :
+                        kpiData.v_C_TotalDisposal?.value.toLocaleString('en-US', {maximumFractionDigits:0})+" "+kpiData.v_C_TotalDisposal?.unit
+                    }
+                </p>
                 </Box>
             </Grid>
             </Grid>
