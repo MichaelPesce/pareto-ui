@@ -45,7 +45,7 @@ export default function Dashboard(props) {
   const handleOpenEditName = () => setOpenEditName(true);
   const handleCloseEditName = () => setOpenEditName(false);
   const { port } = useApp()
-
+console.log(scenario)
   useEffect(()=>{
     try {
       if(!scenario?.data_input) {
@@ -102,8 +102,7 @@ export default function Dashboard(props) {
     handleEditScenarioName(name, scenario.id, true)
     setOpenEditName(false)
   }
-  
-  return (
+  if (scenario?.data_input) return (
     <>
       <ProcessToolbar 
         handleSelection={handleSetSection} 
