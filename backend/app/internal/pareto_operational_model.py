@@ -34,7 +34,7 @@ from importlib import resources
 from pareto.utilities.model_modifications import fix_vars
 
 import idaes.logger as idaeslog
-from app.internal.get_data import get_input_lists
+from app.internal.get_data import get_input_lists, operational_set_list as set_list, operational_parameter_list as parameter_list
 from app.internal.scenario_handler import (
     scenario_handler,
 )
@@ -47,7 +47,7 @@ _log = logging.getLogger(__name__)
 def run_operational_model(input_file, output_file, id, modelParameters, overrideValues={}):
     start_time = datetime.datetime.now()
 
-    [set_list, parameter_list] = get_input_lists(_model_type="operational")
+    # [set_list, parameter_list] = get_input_lists(_model_type="operational")
     
     _log.info(f"getting data from excel sheet")
     [df_sets, df_parameters] = get_data(input_file, set_list, parameter_list)
@@ -109,8 +109,15 @@ def run_operational_model(input_file, output_file, id, modelParameters, override
         _log.error(f"feasibility status check failed, setting termination condition to infeasible")
         termination_condition = "infeasible"
     else:
-        print("\nModel results validated and found to pass feasibility tests\n" + "-" * 60)
+        _log.info("\nModel results validated and found to pass feasibility tests\n" + "-" * 60)
         termination_condition = model_results.solver.termination_condition
+        from app.internal.util import TotalReuseVolumeRule
+        try:
+            _log.info(f"attempting to run total reuse volume")
+            reuse = TotalReuseVolumeRule(operational_model)
+            _log.info(f"reuse is {reuse}")
+        except Exception as e:
+            _log.info(f"unable to get reuse: {e}")
 
 
     if operational_model.config.water_quality is WaterQuality.post_process:

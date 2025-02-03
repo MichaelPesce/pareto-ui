@@ -337,3 +337,53 @@ def get_input_lists(_model_type="strategic"):
         parameter_list = parameter_list + parameter_tabs_operational_model
 
     return [set_list, parameter_list]
+
+
+operational_set_list = [
+    "ProductionPads",
+    "CompletionsPads",
+    "ProductionTanks",
+    "ExternalWaterSources",
+    "WaterQualityComponents",
+    "StorageSites",
+    "SWDSites",
+    "TreatmentSites",
+    "ReuseOptions",
+    "NetworkNodes",
+]
+operational_parameter_list = [
+    "Units",
+    "RCA",
+    "FCA",
+    "PCT",
+    "FCT",
+    "CCT",
+    "PKT",
+    "PRT",
+    "CKT",
+    "CRT",
+    "PAL",
+    "CompletionsDemand",
+    "PadRates",
+    "TankFlowbackRates",
+    "FlowbackRates",
+    "ProductionTankCapacity",
+    "DisposalCapacity",
+    "CompletionsPadStorage",
+    "TreatmentCapacity",
+    "ExtWaterSourcingAvailability",
+    "PadOffloadingCapacity",
+    "TruckingTime",
+    "DisposalOperationalCost",
+    "TreatmentOperationalCost",
+    "ReuseOperationalCost",
+    "PadStorageCost",
+    "PipelineOperationalCost",
+    "TruckingHourlyCost",
+    "ExternalSourcingCost",
+    "ProductionRates",
+    "TreatmentEfficiency",
+    "ExternalWaterQuality",
+    "PadWaterQuality",
+    "StorageInitialWaterQuality",
+]

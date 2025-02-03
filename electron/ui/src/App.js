@@ -39,7 +39,7 @@ function App() {
   const TIME_BETWEEN_CALLS = 20000
   let navigate = useNavigate();
   const { port } = useApp()
-
+  console.log(scenarios)
   useEffect(()=>{
     /*
       1) check for optimizations that are currently running

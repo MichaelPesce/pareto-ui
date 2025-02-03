@@ -26,7 +26,7 @@ from importlib.resources import files
 import idaes.logger as idaeslog
 from pareto.utilities.get_data import get_display_units
 
-from app.internal.get_data import get_data, get_input_lists
+from app.internal.get_data import get_data, get_input_lists, operational_parameter_list, operational_set_list
 from app.internal.settings import AppSettings
 
 # _log = idaeslog.getLogger(__name__)
@@ -201,7 +201,11 @@ class ScenarioHandler:
     
     def upload_excelsheet(self, output_path, scenarioName, filename, model_type="strategic", kmz_data=None):
         _log.info(f"Uploading excel sheet: {scenarioName}")
-        [set_list, parameter_list] = get_input_lists(model_type)
+        if model_type == "operational":
+            set_list = operational_set_list
+            parameter_list = operational_parameter_list
+        else:
+            [set_list, parameter_list] = get_input_lists(model_type)
 
         # read in data from uploaded excel sheet
         [df_sets, df_parameters, frontend_parameters] = get_data(output_path, set_list, parameter_list)
