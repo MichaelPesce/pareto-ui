@@ -707,7 +707,7 @@ export const convertMapDataToFrontendFormat = (map_data) => {
       totalCoords[1] += parseFloat(coords[1])
 
     }
-      lineData.push(newLineObject)
+    lineData.push(newLineObject)
   }
   let mapCenter;
   if (totalCoords[1] && totalCoords[0])
