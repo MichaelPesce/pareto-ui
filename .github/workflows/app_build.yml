@@ -68,6 +68,47 @@ jobs:
       - name: Pin setuptools early to prevent PyInstaller conda hook issues
         run: pip install --force-reinstall "setuptools<81"
       
+      - name: Debug - Check conda and environment info
+        run: |
+          echo "=== Conda version ==="
+          conda --version
+          conda info
+          echo ""
+          echo "=== Conda environment packages ==="
+          conda list | head -20
+          echo ""
+          echo "=== Checking for packages with missing depends metadata ==="
+          python << 'EOF'
+          import json
+          import os
+          import subprocess
+          
+          # Get conda package info
+          try:
+              result = subprocess.run(['conda', 'list', '--json'], capture_output=True, text=True)
+              if result.returncode == 0:
+                  packages = json.loads(result.stdout)
+                  print(f"Total conda packages: {len(packages)}")
+                  
+                  # Check a few packages for metadata
+                  for pkg in packages[:10]:
+                      name = pkg.get('name', 'unknown')
+                      # Try to get package metadata
+                      try:
+                          meta_result = subprocess.run(
+                              ['conda', 'search', '--json', '-c', 'conda-forge', name],
+                              capture_output=True,
+                              text=True,
+                              timeout=5
+                          )
+                      except:
+                          pass
+              else:
+                  print("Could not get conda list")
+          except Exception as e:
+              print(f"Error checking conda packages: {e}")
+          EOF
+      
       - name: Debug - Check setuptools version after initial pin
         run: |
           echo "=== Setuptools version ==="
@@ -172,6 +213,9 @@ jobs:
       
       - name: Debug - Check versions before PyInstaller build
         run: |
+          echo "=== Conda version ==="
+          conda --version
+          echo ""
           echo "=== Setuptools version ==="
           pip show setuptools | grep Version
           python -c "import setuptools; print(f'setuptools.__version__: {setuptools.__version__}')"
@@ -185,6 +229,40 @@ jobs:
           echo "CONDA_PREFIX: $CONDA_PREFIX"
           which python
           python -c "import sys; print(f'Python executable: {sys.executable}')"
+          echo ""
+          echo "=== Conda package metadata check ==="
+          python << 'EOF'
+          import os
+          import json
+          import subprocess
+          
+          # Check conda package metadata format
+          conda_prefix = os.environ.get('CONDA_PREFIX', '')
+          if conda_prefix:
+              pkgs_dir = os.path.join(conda_prefix, 'conda-meta')
+              if os.path.exists(pkgs_dir):
+                  print(f"Checking conda-meta directory: {pkgs_dir}")
+                  meta_files = [f for f in os.listdir(pkgs_dir) if f.endswith('.json')]
+                  print(f"Found {len(meta_files)} metadata files")
+                  
+                  # Check a few metadata files for depends key
+                  missing_depends = []
+                  for meta_file in meta_files[:5]:
+                      meta_path = os.path.join(pkgs_dir, meta_file)
+                      try:
+                          with open(meta_path, 'r') as f:
+                              meta = json.load(f)
+                              if 'depends' not in meta:
+                                  missing_depends.append(meta_file)
+                                  print(f"  {meta_file}: Missing 'depends' key")
+                              else:
+                                  print(f"  {meta_file}: Has 'depends' key ({len(meta.get('depends', []))} items)")
+                      except Exception as e:
+                          print(f"  {meta_file}: Error reading - {e}")
+                  
+                  if missing_depends:
+                      print(f"\nWARNING: Found {len(missing_depends)} packages without 'depends' key")
+          EOF
           echo ""
           echo "=== PYINSTALLER_DISABLE_CONDA check ==="
           echo "PYINSTALLER_DISABLE_CONDA: ${PYINSTALLER_DISABLE_CONDA:-not set}"
@@ -221,18 +299,32 @@ jobs:
       - name: Debug - Test PyInstaller conda hook import
         run: |
           echo "=== Testing PyInstaller conda hook import ==="
-          python -c "
+          python << 'EOF'
           import os
+          import sys
+          
           os.environ['PYINSTALLER_DISABLE_CONDA'] = '1'
           try:
               from PyInstaller.utils.hooks import conda as conda_support
               print('Conda hook imported successfully')
-              print(f'PYINSTALLER_DISABLE_CONDA in env: {\"PYINSTALLER_DISABLE_CONDA\" in os.environ}')
+              print(f'PYINSTALLER_DISABLE_CONDA in env: {"PYINSTALLER_DISABLE_CONDA" in os.environ}')
+              
+              # Try to see what distributions are being initialized
+              try:
+                  if hasattr(conda_support, '_init_distributions'):
+                      print('Attempting to see what distributions are being processed...')
+              except:
+                  pass
+          except KeyError as e:
+              print(f'KeyError importing conda hook: {e}')
+              print('This is the error we are trying to fix')
+              import traceback
+              traceback.print_exc()
           except Exception as e:
               print(f'Error importing conda hook: {e}')
               import traceback
               traceback.print_exc()
-          " || true
+          EOF
       
       - name: Patch PyInstaller conda hook to handle missing depends key
         run: |
