@@ -155,6 +155,9 @@ jobs:
         working-directory: ./backend
         run: pip install -r requirements-build.txt
 
+      - name: Pin setuptools version for PyInstaller compatibility
+        run: pip install "setuptools<81"
+
       - name: Add project pareto version to .env file
         working-directory: ./electron/ui
         run: |
