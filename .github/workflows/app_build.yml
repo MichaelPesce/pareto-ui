@@ -186,7 +186,9 @@ jobs:
 
       - name: Build Backend
         working-directory: ./electron
-        run: npm run build-backend
+        run: |
+          export PYINSTALLER_DISABLE_CONDA=1
+          npm run build-backend
 
       - name: Build Frontend
         working-directory: ./electron
