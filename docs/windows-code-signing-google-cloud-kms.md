@@ -265,6 +265,25 @@ gh repo view new-owner/new-fork-or-repo --json nameWithOwner -q .nameWithOwner
 
 Do not rely only on repository owner checks when personal forks are allowed to sign. Prefer exact `OWNER/REPO` names.
 
+If GitHub Actions fails with `Permission 'iam.serviceAccounts.getAccessToken' denied`, the provider accepted the GitHub OIDC token but the matching GitHub repository is not allowed to impersonate the signing service account. Verify the service-account IAM bindings:
+
+```bash
+gcloud iam service-accounts get-iam-policy "$SERVICE_ACCOUNT_EMAIL" \
+  --project="$PROJECT_ID" \
+  --flatten="bindings[].members" \
+  --filter="bindings.role=roles/iam.workloadIdentityUser" \
+  --format="table(bindings.members)"
+```
+
+Expected members for the shared PARETO UI setup include:
+
+```text
+principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/pareto-github-actions/attribute.repository/project-pareto/pareto-ui
+principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/pareto-github-actions/attribute.repository/MichaelPesce/pareto-ui
+```
+
+If a repository is missing, rerun the `add-iam-policy-binding` loop above with the full repository list.
+
 ## 3. Create A Separate Service Account Or Provider
 
 Do not create these resources every time. Use this section only when a repository needs different audit boundaries, different allowed refs, different approvals, or a different service account from the shared PARETO UI signer.
@@ -530,7 +549,7 @@ If the renewed certificate reuses the same KMS key version, the KMS resource nam
 | --- | --- |
 | OIDC authentication fails | Confirm `id-token: write`, the exact provider resource name, repository spelling and case, and the provider attribute condition. Allow several minutes after IAM changes. |
 | Windows signing configuration is incomplete | Add all four `GCP_CODE_SIGNING_*` repository variables, add matching certificate secrets, or run the workflow with `sign-distribution=false`. |
-| `iam.serviceAccounts.getAccessToken` is denied | Confirm the service account has a `roles/iam.workloadIdentityUser` binding for `project-pareto/pareto-ui` and that the provider condition allows that repository. |
+| `iam.serviceAccounts.getAccessToken` is denied | Confirm the provider condition allows the exact caller repository and that the service account has a `roles/iam.workloadIdentityUser` binding for that repository using the full pool resource name. This is a service-account impersonation problem, not a KMS permission problem. |
 | KMS permission is denied | Confirm the service account has `roles/cloudkms.signerVerifier` on the correct key and that the configured key version is enabled. |
 | Jsign checksum fails | Update `JSIGN_SHA256` only after intentionally changing `JSIGN_VERSION` and verifying the downloaded JAR out of band. |
 | Jsign cannot find the Google Cloud key | Confirm `GCP_CODE_SIGNING_KMS_KEY_VERSION` is the full key-version resource. The workflow parses it into Jsign `--keystore projects/PROJECT/locations/LOCATION/keyRings/KEYRING` and `--alias KEY/cryptoKeyVersions/VERSION`. |
