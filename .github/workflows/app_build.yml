@@ -20,9 +20,6 @@ on:
       sign-distribution:
         type: boolean
         default: true
-      debug-oidc-claims:
-        type: boolean
-        default: false
       package-build-number:
         type: string
       windows-installer-target:
@@ -149,64 +146,6 @@ jobs:
           }
 
           Add-Content -Path $env:GITHUB_OUTPUT -Value 'enabled=true'
-
-      - name: Debug GitHub OIDC claims
-        if: steps.windows-signing.outputs.enabled == 'true' && inputs.debug-oidc-claims
-        shell: pwsh
-        env:
-          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ inputs.gcp-code-signing-workload-identity-provider || secrets.GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          Write-Host "github.repository: ${{ github.repository }}"
-          Write-Host "github.repository_owner: ${{ github.repository_owner }}"
-          Write-Host "github.ref: ${{ github.ref }}"
-          Write-Host "github.workflow_ref: ${{ github.workflow_ref }}"
-          Write-Host "github.event_name: ${{ github.event_name }}"
-
-          if ([string]::IsNullOrWhiteSpace($env:ACTIONS_ID_TOKEN_REQUEST_URL) -or [string]::IsNullOrWhiteSpace($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)) {
-            throw 'GitHub OIDC request environment variables are missing. Confirm this job has id-token: write.'
-          }
-
-          if ([string]::IsNullOrWhiteSpace($env:GCP_WORKLOAD_IDENTITY_PROVIDER)) {
-            throw 'GCP workload identity provider is empty.'
-          }
-
-          $audience = "https://iam.googleapis.com/$env:GCP_WORKLOAD_IDENTITY_PROVIDER"
-          $encodedAudience = [System.Uri]::EscapeDataString($audience)
-          $oidcUri = "$env:ACTIONS_ID_TOKEN_REQUEST_URL&audience=$encodedAudience"
-          $response = Invoke-RestMethod -Uri $oidcUri -Headers @{
-            Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
-            Accept = 'application/json'
-          }
-
-          if ([string]::IsNullOrWhiteSpace($response.value)) {
-            throw 'GitHub OIDC token response did not include a token value.'
-          }
-
-          $tokenParts = $response.value.Split('.')
-          if ($tokenParts.Count -lt 2) {
-            throw 'GitHub OIDC token did not include a JWT payload.'
-          }
-
-          $payload = $tokenParts[1].Replace('-', '+').Replace('_', '/')
-          switch ($payload.Length % 4) {
-            0 { }
-            2 { $payload += '==' }
-            3 { $payload += '=' }
-            default { throw 'GitHub OIDC token payload has invalid base64url padding.' }
-          }
-
-          $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
-
-          Write-Host "oidc.repository: $($claims.repository)"
-          Write-Host "oidc.repository_owner: $($claims.repository_owner)"
-          Write-Host "oidc.ref: $($claims.ref)"
-          Write-Host "oidc.workflow_ref: $($claims.workflow_ref)"
-          Write-Host "oidc.job_workflow_ref: $($claims.job_workflow_ref)"
-          Write-Host "oidc.event_name: $($claims.event_name)"
-          Write-Host "oidc.aud: $($claims.aud)"
-          Write-Host "oidc.sub: $($claims.sub)"
 
       - name: Prepare Jsign KMS parameters
         id: jsign-kms

@@ -362,15 +362,6 @@ gh variable set GCP_CODE_SIGNING_KMS_KEY_VERSION \
 
 If a run failed immediately after an IAM or provider change, wait at least five minutes and rerun it. Workload Identity Federation and service-account IAM updates are not always visible immediately.
 
-If the values still match, rerun the manual build with `debug-oidc-claims=true`. The debug step does not print the token. It prints the GitHub context and selected OIDC claims so you can compare the principal Google Cloud is evaluating. For the shared setup, `oidc.repository` must be exactly one of:
-
-```text
-project-pareto/pareto-ui
-MichaelPesce/pareto-ui
-```
-
-The debug step also prints `oidc.ref` and `oidc.job_workflow_ref`, which are useful if the provider condition is later tightened to a specific branch, tag, or reusable workflow.
-
 If GitHub Actions fails with `Permission 'cloudkms.cryptoKeyVersions.viewPublicKey' denied`, Workload Identity Federation is working and the service account was impersonated successfully. The failure is now key-level KMS authorization. Confirm or add `roles/cloudkms.signerVerifier` on the configured KMS key:
 
 ```bash
