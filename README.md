@@ -1,127 +1,67 @@
-# pareto-ui
-User Interface for the PARETO project
+# PARETO UI
 
-## Getting started (developer)
+PARETO UI is the desktop user interface for the [Project PARETO](https://github.com/project-pareto/project-pareto) produced-water optimization tools. It combines a FastAPI backend, a React frontend, and an Electron desktop shell.
 
-### Prerequisites
+## Documentation
 
-The following steps assume that:
+- [Building and running PARETO UI](docs/building.md)
+- [Windows code signing with Google Cloud KMS](docs/windows-code-signing-google-cloud-kms.md)
+- [PARETO model documentation](https://pareto.readthedocs.io/en/stable/)
 
-1. `conda` is already installed and configured
-2. This repository (i.e. the Pareto UI repository, https://github.com/project-pareto/pareto-ui) has been cloned locally and the working directory is set to the root of the repository
+## Quick Start
 
-## Install On Windows
+From the repository root:
 
-### 1. Creating the Conda environment
-
-Run the following command to create and activate a new Conda environment named `pareto-ui-env`:
-
-```sh
-conda env create --file environment.yml && conda activate pareto-ui-env
-```
-
-This will install the correct runtime versions of both the backend (Python) and frontend (JavaScript/NodeJS/Electron) portions of the UI, as well as the backend (Python) dependencies.
-
-### 2. Install the IDAES solver dependencies
-
-```sh
-idaes get-extensions --verbose
-```
-
-### 3. Install Javascript dependencies
-
-Prerequisites: Node Package Manager (npm)
-
-```console
-cd <pareto-ui-path>/electron
-npm clean-install
-```
-
-```console
-cd <pareto-ui-path>/electron/ui
-npm clean-install
-```
-
-** If you run into ```npm ERR!```, try running ```npm clean-install -d```
-
-## Install On MacOS ARM64
-
-### 1. Creating the Conda environment
-
-Run the following command to create and activate a new Conda environment named `pareto-ui-env`:
-
-```sh
-conda env create --file environment-mac.yml && conda activate pareto-ui-env
-```
-
-This will install the correct runtime versions of both the backend (Python osx/arm64) and frontend (JavaScript/NodeJS/Electron) portions of the UI, as well as the backend (Python) dependencies.
-
-### 2. Uninstall x86-64 versions of numpy and pandas
-
-```sh
-pip uninstall -y numpy pandas
-```
-
-### 3. Install osx/arm64 versions of numpy and pandas
-
-```sh
-conda install -y -c conda-forge/osx-arm64 numpy pandas=2.0.3
-```
-
-### 4. Install the IDAES solver dependencies
-
-```sh
-idaes get-extensions --verbose
-```
-
-### 5. Install Javascript dependencies
-
-Prerequisites: Node Package Manager (npm)
-
-```console
-cd <pareto-ui-path>/electron
-npm clean-install
-```
-
-```console
-cd <pareto-ui-path>/electron/ui
-npm clean-install
-```
-
-## Running the UI
-
-### Ensure that the `pareto-ui-env` Conda environment is active
-
-```console
+```bash
+conda env create --file environment.yml
 conda activate pareto-ui-env
+pip install -r backend/requirements.txt
+idaes get-extensions --verbose
+npm --prefix electron clean-install
+npm --prefix electron/ui clean-install
 ```
 
-### Option 1: Run UI in browser
+Create `electron/ui/.env` for local development:
 
-```console
-cd <pareto-ui-path>/electron/ui
-npm run app-start
+```bash
+cat > electron/ui/.env <<'EOF'
+REACT_APP_PARETO_VERSION=main
+REACT_APP_BUILD_NUMBER=local
+EOF
 ```
 
-### Option 2: Run UI with electron
+Run in a browser:
 
-```console
-cd <pareto-ui-path>/electron/ui
-npm run electron-start
+```bash
+npm --prefix electron/ui run app-start
 ```
 
-## Building production Electron App
+Run in Electron:
 
-### Windows (requires Windows OS):
+```bash
+npm --prefix electron/ui run electron-start
+```
 
-```console
-cd <pareto-ui-path>/electron
+## Packaged Builds
+
+Local package scripts are available from `electron/package.json`:
+
+```bash
+cd electron
 npm run dist:win
-```
-
-### Mac (requires Mac OS):
-
-```console
-cd <pareto-ui-path>/electron
 npm run dist:mac
+npm run dist:lin
 ```
+
+Use the GitHub Actions manual workflow for release-style builds and Windows code signing:
+
+```bash
+gh workflow run app_build_dispatch.yml \
+  --repo project-pareto/pareto-ui \
+  --ref main \
+  -f os-version=windows-latest \
+  -f sign-distribution=true \
+  -f windows-installer-target=nsis
+```
+
+See [Building and running PARETO UI](docs/building.md) for full build inputs and artifact names.

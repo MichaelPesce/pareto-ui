@@ -25,16 +25,41 @@ on:
       windows-installer-target:
         type: string
         default: nsis
+      gcp-code-signing-project-id:
+        type: string
+        default: ''
+      gcp-code-signing-workload-identity-provider:
+        type: string
+        default: ''
+      gcp-code-signing-service-account:
+        type: string
+        default: ''
+      gcp-code-signing-kms-key-version:
+        type: string
+        default: ''
+      jsign-version:
+        type: string
+        default: '7.5'
+      jsign-sha256:
+        type: string
+        default: '602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c'
+      windows-signing-timestamp-url:
+        type: string
+        default: 'http://timestamp.digicert.com'
     secrets:
-      AZURE_KEY_VAULT_URI:
+      GCP_CODE_SIGNING_PROJECT_ID:
         required: false
-      AZURE_CLIENT_ID:
+      GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER:
         required: false
-      AZURE_TENANT_ID:
+      GCP_CODE_SIGNING_SERVICE_ACCOUNT:
         required: false
-      AZURE_CLIENT_SECRET:
+      GCP_CODE_SIGNING_KMS_KEY_VERSION:
         required: false
-      AZURE_CERT_NAME:
+      GCP_CODE_SIGNING_CERTIFICATE_BASE64:
+        required: false
+      GCP_CODE_SIGNING_INTERMEDIATE_1_BASE64:
+        required: false
+      GCP_CODE_SIGNING_INTERMEDIATE_2_BASE64:
         required: false
       APPLE_BUILD_CERTIFICATE_BASE64:
         required: false
@@ -63,27 +88,294 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          environment-file: environment.yml
-          activate-environment: pareto-ui-env
-          miniforge-version: 25.3.1-0
-
-      # Jsign is a Java jar - must set up Java
-      - name: Set up Java for Jsign
+      - name: Check Windows signing configuration
+        id: windows-signing
         if: runner.os == 'Windows' && inputs.sign-distribution
+        shell: pwsh
+        env:
+          GCP_PROJECT_ID: ${{ inputs.gcp-code-signing-project-id || secrets.GCP_CODE_SIGNING_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ inputs.gcp-code-signing-workload-identity-provider || secrets.GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ inputs.gcp-code-signing-service-account || secrets.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
+          GCP_KMS_KEY_VERSION: ${{ inputs.gcp-code-signing-kms-key-version || secrets.GCP_CODE_SIGNING_KMS_KEY_VERSION }}
+          LEAF_BASE64: ${{ secrets.GCP_CODE_SIGNING_CERTIFICATE_BASE64 }}
+          INTERMEDIATE_1_BASE64: ${{ secrets.GCP_CODE_SIGNING_INTERMEDIATE_1_BASE64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $requiredVariables = [ordered]@{
+            'gcp-code-signing-project-id' = $env:GCP_PROJECT_ID
+            'gcp-code-signing-workload-identity-provider' = $env:GCP_WORKLOAD_IDENTITY_PROVIDER
+            'gcp-code-signing-service-account' = $env:GCP_SERVICE_ACCOUNT
+            'gcp-code-signing-kms-key-version' = $env:GCP_KMS_KEY_VERSION
+          }
+
+          $requiredSecrets = [ordered]@{
+            'GCP_CODE_SIGNING_CERTIFICATE_BASE64' = $env:LEAF_BASE64
+            'GCP_CODE_SIGNING_INTERMEDIATE_1_BASE64' = $env:INTERMEDIATE_1_BASE64
+          }
+
+          $missingVariables = @()
+          foreach ($item in $requiredVariables.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($item.Value)) {
+              $missingVariables += $item.Key
+            }
+          }
+
+          if ($missingVariables.Count -eq $requiredVariables.Count) {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'enabled=false'
+            Write-Host 'Windows signing skipped because no Google Cloud code signing repository variables are available.'
+            exit 0
+          }
+
+          if ($missingVariables.Count -gt 0) {
+            throw "Windows signing configuration is incomplete. Missing repository variables: $($missingVariables -join ', ')"
+          }
+
+          $missingSecrets = @()
+          foreach ($item in $requiredSecrets.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($item.Value)) {
+              $missingSecrets += $item.Key
+            }
+          }
+
+          if ($missingSecrets.Count -gt 0) {
+            throw "Windows signing configuration is incomplete. Missing repository or environment secrets: $($missingSecrets -join ', ')"
+          }
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value 'enabled=true'
+
+      - name: Prepare Jsign KMS parameters
+        id: jsign-kms
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          GCP_KMS_KEY_VERSION: ${{ inputs.gcp-code-signing-kms-key-version || secrets.GCP_CODE_SIGNING_KMS_KEY_VERSION }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $match = [regex]::Match(
+            $env:GCP_KMS_KEY_VERSION,
+            '^projects/(?<project>[^/]+)/locations/(?<location>[^/]+)/keyRings/(?<keyring>[^/]+)/cryptoKeys/(?<key>[^/]+)/cryptoKeyVersions/(?<version>[^/]+)$'
+          )
+
+          if (-not $match.Success) {
+            throw 'GCP KMS key version must use projects/PROJECT_ID/locations/LOCATION/keyRings/KEYRING/cryptoKeys/KEY/cryptoKeyVersions/VERSION.'
+          }
+
+          $project = $match.Groups['project'].Value
+          $location = $match.Groups['location'].Value
+          $keyring = $match.Groups['keyring'].Value
+          $key = $match.Groups['key'].Value
+          $version = $match.Groups['version'].Value
+          $keystore = "projects/$project/locations/$location/keyRings/$keyring"
+          $alias = "$key/cryptoKeyVersions/$version"
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "keystore=$keystore"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "alias=$alias"
+
+      - name: Preflight Google Cloud authentication
+        id: google-auth-preflight
+        if: steps.windows-signing.outputs.enabled == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ inputs.gcp-code-signing-project-id || secrets.GCP_CODE_SIGNING_PROJECT_ID }}
+          workload_identity_provider: ${{ inputs.gcp-code-signing-workload-identity-provider || secrets.GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.gcp-code-signing-service-account || secrets.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 300s
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Preflight Google Cloud KMS access
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          GCP_KMS_KEY_VERSION: ${{ inputs.gcp-code-signing-kms-key-version || secrets.GCP_CODE_SIGNING_KMS_KEY_VERSION }}
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google-auth-preflight.outputs.access_token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_ACCESS_TOKEN)) {
+            throw 'Google Cloud authentication preflight did not return an access token.'
+          }
+
+          $headers = @{
+            Authorization = "Bearer $env:GOOGLE_ACCESS_TOKEN"
+          }
+          $publicKeyUri = "https://cloudkms.googleapis.com/v1/$env:GCP_KMS_KEY_VERSION/publicKey"
+
+          Invoke-RestMethod -Method Get -Uri $publicKeyUri -Headers $headers | Out-Null
+
+      - name: Prepare Jsign certificate chain
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          LEAF_BASE64: ${{ secrets.GCP_CODE_SIGNING_CERTIFICATE_BASE64 }}
+          INTERMEDIATE_1_BASE64: ${{ secrets.GCP_CODE_SIGNING_INTERMEDIATE_1_BASE64 }}
+          INTERMEDIATE_2_BASE64: ${{ secrets.GCP_CODE_SIGNING_INTERMEDIATE_2_BASE64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Import-CertificateSecret {
+            param(
+              [string]$Name,
+              [string]$Base64Value
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Name)) {
+              throw 'Certificate input name is empty.'
+            }
+
+            if ([string]::IsNullOrWhiteSpace($Base64Value)) {
+              throw "${Name} certificate secret is empty."
+            }
+
+            $path = Join-Path $env:RUNNER_TEMP "$Name.cer"
+            $normalized = $Base64Value -replace '\s', ''
+
+            try {
+              [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($normalized))
+            } catch {
+              throw "Failed to decode ${Name} certificate secret as base64: $($_.Exception.Message)"
+            }
+
+            $certificates = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+            $importedCertificates = @()
+            $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path))
+
+            try {
+              if ($text -match '-----BEGIN CERTIFICATE-----') {
+                $pemCertificates = [regex]::Matches(
+                  $text,
+                  '-----BEGIN CERTIFICATE-----\s*(?<body>[A-Za-z0-9+/=\r\n]+?)\s*-----END CERTIFICATE-----'
+                )
+
+                if ($pemCertificates.Count -eq 0) {
+                  throw "Found a PEM certificate header in ${Name}, but no complete certificate block."
+                }
+
+                foreach ($pemCertificate in $pemCertificates) {
+                  $pemBody = $pemCertificate.Groups['body'].Value -replace '\s', ''
+                  $certificateBytes = [Convert]::FromBase64String($pemBody)
+                  $importedCertificates += [Security.Cryptography.X509Certificates.X509Certificate2]::new($certificateBytes)
+                }
+              } elseif ($text -match '-----BEGIN (PKCS7|PKCS #7 SIGNED DATA)-----') {
+                $pkcs7 = [regex]::Match(
+                  $text,
+                  '-----BEGIN (?:PKCS7|PKCS #7 SIGNED DATA)-----\s*(?<body>[A-Za-z0-9+/=\r\n]+?)\s*-----END (?:PKCS7|PKCS #7 SIGNED DATA)-----'
+                )
+                if (-not $pkcs7.Success) {
+                  throw "Failed to parse ${Name} PEM PKCS#7 content."
+                }
+
+                $pkcs7Body = $pkcs7.Groups['body'].Value -replace '\s', ''
+                $certificates.Import([Convert]::FromBase64String($pkcs7Body))
+              } else {
+                $certificates.Import($path)
+              }
+            } catch {
+              throw "Failed to import ${Name} certificate material. Store the base64 of a .cer, .pem, .p7b, or .spc file: $($_.Exception.Message)"
+            }
+
+            if ($certificates.Count -eq 0) {
+              if ($importedCertificates.Count -eq 0) {
+                throw "No certificates were found in ${Name} certificate material."
+              }
+            } else {
+              foreach ($certificate in $certificates) {
+                $importedCertificates += $certificate
+              }
+            }
+
+            return $importedCertificates
+          }
+
+          $allCertificates = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+
+          $certificateInputs = @(
+            @{ Name = 'leaf'; Value = $env:LEAF_BASE64 },
+            @{ Name = 'intermediate-1'; Value = $env:INTERMEDIATE_1_BASE64 }
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($env:INTERMEDIATE_2_BASE64)) {
+            $certificateInputs += @{ Name = 'intermediate-2'; Value = $env:INTERMEDIATE_2_BASE64 }
+          }
+
+          foreach ($certificateInput in $certificateInputs) {
+            $importedCertificates = @(
+              Import-CertificateSecret `
+                -Name $certificateInput.Name `
+                -Base64Value $certificateInput.Value
+            )
+
+            foreach ($certificate in $importedCertificates) {
+              [void]$allCertificates.Add($certificate)
+            }
+          }
+
+          if ($allCertificates.Count -eq 0) {
+            throw 'No certificates were available for Jsign.'
+          }
+
+          $chainPath = Join-Path $env:RUNNER_TEMP 'code-signing-chain.p7b'
+          $chainBytes = $allCertificates.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pkcs7)
+          if ($null -eq $chainBytes -or $chainBytes.Length -eq 0) {
+            throw 'Failed to export the Jsign certificate chain as PKCS#7.'
+          }
+          [IO.File]::WriteAllBytes($chainPath, $chainBytes)
+
+          Add-Content -Path $env:GITHUB_ENV -Value "GCP_SIGNING_CERTIFICATE_CHAIN=$chainPath"
+          Write-Host "Prepared Jsign PKCS#7 certificate chain with $($allCertificates.Count) certificate(s): $chainPath"
+
+      - name: Set up Java for Jsign
+        if: steps.windows-signing.outputs.enabled == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # download Jsign v7.4
       - name: Download Jsign
-        if: runner.os == 'Windows' && inputs.sign-distribution
+        id: jsign
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          JSIGN_VERSION: ${{ inputs.jsign-version }}
+          JSIGN_SHA256: ${{ inputs.jsign-sha256 }}
         run: |
-          curl -L --fail \
-            -o "$RUNNER_TEMP/jsign.jar" \
-            "https://github.com/ebourg/jsign/releases/download/7.4/jsign-7.4.jar"
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:JSIGN_VERSION)) {
+            throw 'JSIGN_VERSION is empty.'
+          }
+
+          $version = $env:JSIGN_VERSION.TrimStart('v')
+          $jarName = "jsign-$version.jar"
+          $jarPath = Join-Path $env:RUNNER_TEMP $jarName
+          $downloadUrl = "https://github.com/ebourg/jsign/releases/download/$version/$jarName"
+
+          Write-Host "Downloading Jsign $version from $downloadUrl"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $jarPath
+
+          if (-not [string]::IsNullOrWhiteSpace($env:JSIGN_SHA256)) {
+            $expectedDigest = $env:JSIGN_SHA256.Trim().ToLowerInvariant()
+            $actualDigest = (Get-FileHash -Algorithm SHA256 -Path $jarPath).Hash.ToLowerInvariant()
+            Write-Host "Jsign SHA256: $actualDigest"
+            if ($actualDigest -ne $expectedDigest) {
+              throw "Downloaded Jsign digest mismatch. Expected $expectedDigest; got $actualDigest."
+            }
+          } else {
+            Write-Warning 'No JSIGN_SHA256 value was provided; skipping Jsign download verification.'
+          }
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$jarPath"
+
+          & java -jar $jarPath --version
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pareto-ui-env
+          miniforge-version: 25.3.1-0
 
       ## handle Apple certificate, keychain setup for mac builds
       - name: Install the Apple certificate
@@ -214,6 +506,7 @@ jobs:
 
       - name: Build ${{ steps.dynamic-variables.outputs.os }} Distribution
         env:
+          SIGN_DISTRIBUTION: ${{ inputs.sign-distribution }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           NOTARIZE_TOOL: ${{ secrets.NOTARIZE_TOOL }}
@@ -221,66 +514,192 @@ jobs:
         working-directory: ./electron
         run: |
           if [ "${{ steps.dynamic-variables.outputs.os }}" = "arm64" ]; then
+            if [ "${SIGN_DISTRIBUTION}" != "true" ]; then
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              unset APPLE_ID APPLE_ID_PASSWORD NOTARIZE_TOOL TEAM_ID
+            fi
             npm run electron-build-mac
           else
             npm run electron-build-win
           fi
 
-      # sign windows distribution with Jsign
-      - name: Sign Windows Distribution
-        if: runner.os == 'Windows' && inputs.sign-distribution && env.AZURE_KEY_VAULT_URI != '' && env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_SECRET != '' && env.AZURE_CERT_NAME != ''
+      - name: Authenticate to Google Cloud
+        id: google-auth
+        if: steps.windows-signing.outputs.enabled == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ inputs.gcp-code-signing-project-id || secrets.GCP_CODE_SIGNING_PROJECT_ID }}
+          workload_identity_provider: ${{ inputs.gcp-code-signing-workload-identity-provider || secrets.GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.gcp-code-signing-service-account || secrets.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Sign Windows Distribution with Jsign
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
         env:
-          AZURE_KEY_VAULT_URI: ${{ secrets.AZURE_KEY_VAULT_URI }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_CERT_NAME: ${{ secrets.AZURE_CERT_NAME }}
-        working-directory: electron/dist
+          ARTIFACT_NAME: ${{ steps.dynamic-variables.outputs.artifact-name }}
+          DIST_DIR: electron/dist
+          FINAL_ARTIFACT: ${{ steps.dynamic-variables.outputs.final-artifact }}
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          JSIGN_ALIAS: ${{ steps.jsign-kms.outputs.alias }}
+          JSIGN_JAR: ${{ steps.jsign.outputs.path }}
+          JSIGN_KEYSTORE: ${{ steps.jsign-kms.outputs.keystore }}
+          TIMESTAMP_URL: ${{ inputs.windows-signing-timestamp-url }}
+          WINDOWS_INSTALLER_TARGET: ${{ inputs.windows-installer-target }}
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = 'Stop'
 
-          echo "Authenticating to Azure with service principal"
-          az login --service-principal \
-            --username "$AZURE_CLIENT_ID" \
-            --password "$AZURE_CLIENT_SECRET" \
-            --tenant "$AZURE_TENANT_ID" \
-            --output none
+          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_ACCESS_TOKEN)) {
+            throw 'Google Cloud authentication did not return an access token for Jsign.'
+          }
 
-          echo "Getting access token for Azure Key Vault"
-          ACCESS_TOKEN="$(az account get-access-token \
-            --resource https://vault.azure.net \
-            --query accessToken \
-            --output tsv)"
+          if (-not (Test-Path -LiteralPath $env:JSIGN_JAR)) {
+            throw "Jsign JAR does not exist: $env:JSIGN_JAR"
+          }
 
-          VAULT_NAME="${AZURE_KEY_VAULT_URI#https://}"
-          VAULT_NAME="${VAULT_NAME%%/}"
-          VAULT_NAME="${VAULT_NAME%%.vault.azure.net}"
-          VAULT_NAME="${VAULT_NAME%%.managedhsm.azure.net}"
+          if (-not (Test-Path -LiteralPath $env:GCP_SIGNING_CERTIFICATE_CHAIN)) {
+            throw "Jsign certificate chain does not exist: $env:GCP_SIGNING_CERTIFICATE_CHAIN"
+          }
 
-          JSIGN_CMD=(
-            java -jar "$RUNNER_TEMP/jsign.jar"
-            --storetype AZUREKEYVAULT
-            --keystore "$VAULT_NAME"
-            --storepass "$ACCESS_TOKEN"
-            --alias "$AZURE_CERT_NAME"
-            --tsaurl "http://timestamp.digicert.com"
-          )
+          $repoPath = (Get-Location).Path
+          $distPath = Join-Path $repoPath $env:DIST_DIR
+          $artifactPath = Join-Path $distPath $env:FINAL_ARTIFACT
 
-          if [ "${{ inputs.windows-installer-target }}" = "zip" ]; then
-            echo "Signing individual files in dir target"
-            mv win-unpacked "${{ steps.dynamic-variables.outputs.artifact-name }}"
-            cd "${{ steps.dynamic-variables.outputs.artifact-name }}"
-            ls -la
+          function Invoke-CodeSigning {
+            param([string]$Path)
 
-            echo "Recursively signing .exe and .dll files"
-            while IFS= read -r -d '' file; do
-              echo "Signing $file"
-              "${JSIGN_CMD[@]}" "$file"
-            done < <(find . -type f \( -iname "*.exe" -o -iname "*.dll" \) -print0)
-          else
-            echo "Signing windows artifact"
-            "${JSIGN_CMD[@]}" "${{ steps.dynamic-variables.outputs.artifact-name }}.exe"
-          fi
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "File does not exist: $Path"
+            }
+
+            Write-Host "Signing artifact: $Path"
+
+            $jsignArgs = @(
+              '--storetype', 'GOOGLECLOUD',
+              '--keystore', $env:JSIGN_KEYSTORE,
+              '--storepass', 'env:GOOGLE_ACCESS_TOKEN',
+              '--alias', $env:JSIGN_ALIAS,
+              '--certfile', $env:GCP_SIGNING_CERTIFICATE_CHAIN,
+              '--alg', 'SHA-256',
+              '--tsaurl', $env:TIMESTAMP_URL,
+              '--tsmode', 'RFC3161',
+              '--tsretries', '3',
+              '--tsretrywait', '10',
+              $Path
+            )
+
+            & java -jar $env:JSIGN_JAR @jsignArgs
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Jsign failed with exit code $LASTEXITCODE."
+            }
+          }
+
+          Write-Host "Timestamp URL: $env:TIMESTAMP_URL"
+
+          if ($env:WINDOWS_INSTALLER_TARGET -eq 'zip') {
+            $unpackedPath = Join-Path $distPath 'win-unpacked'
+            $portablePath = Join-Path $distPath $env:ARTIFACT_NAME
+
+            if (Test-Path -LiteralPath $unpackedPath -PathType Container) {
+              if (Test-Path -LiteralPath $portablePath) {
+                throw "Cannot move $unpackedPath to $portablePath because the target already exists."
+              }
+
+              Move-Item -LiteralPath $unpackedPath -Destination $portablePath
+            } elseif (-not (Test-Path -LiteralPath $portablePath -PathType Container)) {
+              throw "Windows unpacked artifact does not exist: $unpackedPath"
+            }
+
+            $filesToSign = @(
+              Get-ChildItem -LiteralPath $portablePath -Recurse -File |
+                Where-Object { $_.Extension -in @('.exe', '.dll') }
+            )
+
+            if ($filesToSign.Count -eq 0) {
+              throw "No .exe or .dll files were found to sign under $portablePath."
+            }
+
+            foreach ($file in $filesToSign) {
+              Invoke-CodeSigning -Path $file.FullName
+            }
+          } else {
+            Invoke-CodeSigning -Path $artifactPath
+          }
+
+      - name: Verify Windows Signature with SignTool
+        if: steps.windows-signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          ARTIFACT_NAME: ${{ steps.dynamic-variables.outputs.artifact-name }}
+          DIST_DIR: electron/dist
+          FINAL_ARTIFACT: ${{ steps.dynamic-variables.outputs.final-artifact }}
+          WINDOWS_INSTALLER_TARGET: ${{ inputs.windows-installer-target }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $repoPath = (Get-Location).Path
+          $distPath = Join-Path $repoPath $env:DIST_DIR
+          $artifactPath = Join-Path $distPath $env:FINAL_ARTIFACT
+
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signTool) {
+            throw 'Could not locate the x64 Windows SDK signtool.exe.'
+          }
+
+          function Test-CodeSignature {
+            param([string]$Path)
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "File does not exist: $Path"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath $Path
+            Write-Host "PowerShell Authenticode status for ${Path}: $($signature.Status)"
+            if ($signature.SignerCertificate) {
+              Write-Host "Signer subject: $($signature.SignerCertificate.Subject)"
+              Write-Host "Signer issuer: $($signature.SignerCertificate.Issuer)"
+              Write-Host "Signer thumbprint: $($signature.SignerCertificate.Thumbprint)"
+            }
+            if ($signature.TimeStamperCertificate) {
+              Write-Host "Timestamp subject: $($signature.TimeStamperCertificate.Subject)"
+            }
+
+            & $signTool verify /pa /all /v /tw $Path
+            if ($LASTEXITCODE -ne 0) {
+              throw "SignTool verification failed with exit code $LASTEXITCODE."
+            }
+          }
+
+          if ($env:WINDOWS_INSTALLER_TARGET -eq 'zip') {
+            $portablePath = Join-Path $distPath $env:ARTIFACT_NAME
+            if (-not (Test-Path -LiteralPath $portablePath -PathType Container)) {
+              throw "Windows portable artifact does not exist: $portablePath"
+            }
+
+            $signedFiles = @(
+              Get-ChildItem -LiteralPath $portablePath -Recurse -File |
+                Where-Object { $_.Extension -in @('.exe', '.dll') }
+            )
+
+            if ($signedFiles.Count -eq 0) {
+              throw "No .exe or .dll files were found to verify under $portablePath."
+            }
+
+            foreach ($file in $signedFiles) {
+              Test-CodeSignature -Path $file.FullName
+            }
+          } else {
+            Test-CodeSignature -Path $artifactPath
+          }
 
       - name: Upload artifact for ${{ steps.dynamic-variables.outputs.os }} build
         uses: actions/upload-artifact@v4
