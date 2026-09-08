@@ -87,6 +87,9 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/app_build.yml
     name: ${{ needs.prepare.outputs.os }}
+    permissions:
+      contents: read
+      id-token: write
     with:
       job-name:  ${{ needs.prepare.outputs.job-name }}
       os-version: ${{ inputs.os-version }}
@@ -96,4 +99,11 @@ jobs:
       project-pareto-branch: ${{ inputs.project-pareto-branch }}
       project-pareto-version: ${{ inputs.project-pareto-version }}
       windows-installer-target: ${{ inputs.windows-installer-target }}
+      gcp-code-signing-project-id: ${{ vars.GCP_CODE_SIGNING_PROJECT_ID }}
+      gcp-code-signing-workload-identity-provider: ${{ vars.GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER }}
+      gcp-code-signing-service-account: ${{ vars.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
+      gcp-code-signing-kms-key-version: ${{ vars.GCP_CODE_SIGNING_KMS_KEY_VERSION }}
+      jsign-version: ${{ vars.JSIGN_VERSION || '7.5' }}
+      jsign-sha256: ${{ vars.JSIGN_SHA256 || '602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c' }}
+      windows-signing-timestamp-url: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
     secrets: inherit
