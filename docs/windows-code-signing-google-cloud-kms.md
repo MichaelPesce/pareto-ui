@@ -97,6 +97,35 @@ export GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER="projects/${PROJECT_NUMBER}/l
 export GCP_CODE_SIGNING_KMS_KEY_VERSION="projects/${PROJECT_ID}/locations/${KMS_LOCATION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY}/cryptoKeyVersions/${KMS_VERSION}"
 ```
 
+Confirm the signing service account has KMS access on the current key:
+
+```bash
+gcloud kms keys get-iam-policy "$KMS_KEY" \
+  --project="$PROJECT_ID" \
+  --location="$KMS_LOCATION" \
+  --keyring="$KMS_KEYRING" \
+  --format="yaml(bindings)"
+```
+
+The policy must include this member and role:
+
+```text
+role: roles/cloudkms.signerVerifier
+members:
+- serviceAccount:pareto-github-code-signer@uds-windows-development.iam.gserviceaccount.com
+```
+
+Add the binding if it is missing:
+
+```bash
+gcloud kms keys add-iam-policy-binding "$KMS_KEY" \
+  --project="$PROJECT_ID" \
+  --location="$KMS_LOCATION" \
+  --keyring="$KMS_KEYRING" \
+  --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+  --role="roles/cloudkms.signerVerifier"
+```
+
 Future developers should not create a new Google Cloud project, KMS key ring, Workload Identity Pool, or Workload Identity Provider for routine PARETO UI signing access. Reuse the shared resources above, then either add their repository to the existing provider and service-account IAM policy, or create a separate service account if they need separate audit or permission boundaries.
 
 Use placeholders only when creating a separate signing setup:
@@ -341,6 +370,19 @@ MichaelPesce/pareto-ui
 ```
 
 The debug step also prints `oidc.ref` and `oidc.job_workflow_ref`, which are useful if the provider condition is later tightened to a specific branch, tag, or reusable workflow.
+
+If GitHub Actions fails with `Permission 'cloudkms.cryptoKeyVersions.viewPublicKey' denied`, Workload Identity Federation is working and the service account was impersonated successfully. The failure is now key-level KMS authorization. Confirm or add `roles/cloudkms.signerVerifier` on the configured KMS key:
+
+```bash
+gcloud kms keys add-iam-policy-binding "$KMS_KEY" \
+  --project="$PROJECT_ID" \
+  --location="$KMS_LOCATION" \
+  --keyring="$KMS_KEYRING" \
+  --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+  --role="roles/cloudkms.signerVerifier"
+```
+
+Run this against `globalsign-certificate-2026`, not the old `windows-code-signing` key name.
 
 ## 3. Create A Separate Service Account Or Provider
 
@@ -608,6 +650,7 @@ If the renewed certificate reuses the same KMS key version, the KMS resource nam
 | OIDC authentication fails | Confirm `id-token: write`, the exact provider resource name, repository spelling and case, and the provider attribute condition. The provider resource must use project number `150534288369`, not project ID `uds-windows-development`. Allow several minutes after IAM changes. |
 | Windows signing configuration is incomplete | Add all four `GCP_CODE_SIGNING_*` repository variables, add matching certificate secrets, or run the workflow with `sign-distribution=false`. |
 | `iam.serviceAccounts.getAccessToken` is denied | Confirm the workflow run is in `project-pareto/pareto-ui` or `MichaelPesce/pareto-ui`, the GitHub variables in that repo point at `projects/150534288369/locations/global/workloadIdentityPools/pareto-github-actions/providers/pareto-ui-windows-code-signing`, and the service account has a `roles/iam.workloadIdentityUser` binding for that exact repository. This is a service-account impersonation problem, not a KMS permission problem. |
+| `cloudkms.cryptoKeyVersions.viewPublicKey` is denied | Workload Identity Federation is working. Grant `roles/cloudkms.signerVerifier` to the signing service account on the configured KMS key, then rerun after IAM propagation. |
 | KMS permission is denied | Confirm the service account has `roles/cloudkms.signerVerifier` on the correct key and that the configured key version is enabled. |
 | Jsign checksum fails | Update `JSIGN_SHA256` only after intentionally changing `JSIGN_VERSION` and verifying the downloaded JAR out of band. |
 | Jsign cannot find the Google Cloud key | Confirm `GCP_CODE_SIGNING_KMS_KEY_VERSION` is the full key-version resource. The workflow parses it into Jsign `--keystore projects/PROJECT/locations/LOCATION/keyRings/KEYRING` and `--alias KEY/cryptoKeyVersions/VERSION`. |
