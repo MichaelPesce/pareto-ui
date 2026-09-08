@@ -52,10 +52,12 @@ Current shared PARETO UI signing resources:
 | Value | Current setting |
 | --- | --- |
 | Google Cloud project ID | `uds-windows-development` |
+| Google Cloud project number | `150534288369` |
 | Service account ID | `pareto-github-code-signer` |
 | Service account email | `pareto-github-code-signer@uds-windows-development.iam.gserviceaccount.com` |
 | Workload Identity Pool ID | `pareto-github-actions` |
 | Workload Identity Provider ID | `pareto-ui-windows-code-signing` |
+| Full Workload Identity Provider resource | `projects/150534288369/locations/global/workloadIdentityPools/pareto-github-actions/providers/pareto-ui-windows-code-signing` |
 | KMS location | `global` |
 | KMS key ring | `codesigning` |
 | KMS key | `globalsign-certificate-2026` |
@@ -64,7 +66,7 @@ Current shared PARETO UI signing resources:
 | Main repository | `project-pareto/pareto-ui` |
 | Currently trusted fork | `MichaelPesce/pareto-ui` |
 
-The full Workload Identity Provider resource name is not written here because it includes the Google Cloud project number. Fetch it with:
+The full Workload Identity Provider resource name must use the Google Cloud project number, not the project ID. Fetch it with:
 
 ```bash
 export PROJECT_ID="uds-windows-development"
@@ -82,6 +84,7 @@ For the current shared setup, use:
 
 ```bash
 export PROJECT_ID="uds-windows-development"
+export PROJECT_NUMBER="150534288369"
 export SERVICE_ACCOUNT_ID="pareto-github-code-signer"
 export SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
 export POOL_ID="pareto-github-actions"
@@ -90,6 +93,7 @@ export KMS_LOCATION="global"
 export KMS_KEYRING="codesigning"
 export KMS_KEY="globalsign-certificate-2026"
 export KMS_VERSION="2"
+export GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 export GCP_CODE_SIGNING_KMS_KEY_VERSION="projects/${PROJECT_ID}/locations/${KMS_LOCATION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY}/cryptoKeyVersions/${KMS_VERSION}"
 ```
 
@@ -283,6 +287,60 @@ principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workl
 ```
 
 If a repository is missing, rerun the `add-iam-policy-binding` loop above with the full repository list.
+
+If those members already exist and the workflow still fails with `iam.serviceAccounts.getAccessToken`, check the GitHub repository variables in the repository where the workflow run is executing. This error can happen when GitHub Actions authenticates through a different Workload Identity Provider or pool than the one bound to the service account.
+
+```bash
+for repo in "project-pareto/pareto-ui" "MichaelPesce/pareto-ui"; do
+  echo "== ${repo} =="
+  gh variable get GCP_CODE_SIGNING_PROJECT_ID --repo "$repo"
+  gh variable get GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER --repo "$repo"
+  gh variable get GCP_CODE_SIGNING_SERVICE_ACCOUNT --repo "$repo"
+  gh variable get GCP_CODE_SIGNING_KMS_KEY_VERSION --repo "$repo"
+done
+```
+
+Expected values for the current shared setup:
+
+```text
+GCP_CODE_SIGNING_PROJECT_ID=uds-windows-development
+GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER=projects/150534288369/locations/global/workloadIdentityPools/pareto-github-actions/providers/pareto-ui-windows-code-signing
+GCP_CODE_SIGNING_SERVICE_ACCOUNT=pareto-github-code-signer@uds-windows-development.iam.gserviceaccount.com
+GCP_CODE_SIGNING_KMS_KEY_VERSION=projects/uds-windows-development/locations/global/keyRings/codesigning/cryptoKeys/globalsign-certificate-2026/cryptoKeyVersions/2
+```
+
+Fix a repository's variables with:
+
+```bash
+export GH_REPO="MichaelPesce/pareto-ui"
+
+gh variable set GCP_CODE_SIGNING_PROJECT_ID \
+  --repo "$GH_REPO" \
+  --body "uds-windows-development"
+
+gh variable set GCP_CODE_SIGNING_WORKLOAD_IDENTITY_PROVIDER \
+  --repo "$GH_REPO" \
+  --body "projects/150534288369/locations/global/workloadIdentityPools/pareto-github-actions/providers/pareto-ui-windows-code-signing"
+
+gh variable set GCP_CODE_SIGNING_SERVICE_ACCOUNT \
+  --repo "$GH_REPO" \
+  --body "pareto-github-code-signer@uds-windows-development.iam.gserviceaccount.com"
+
+gh variable set GCP_CODE_SIGNING_KMS_KEY_VERSION \
+  --repo "$GH_REPO" \
+  --body "projects/uds-windows-development/locations/global/keyRings/codesigning/cryptoKeys/globalsign-certificate-2026/cryptoKeyVersions/2"
+```
+
+If a run failed immediately after an IAM or provider change, wait at least five minutes and rerun it. Workload Identity Federation and service-account IAM updates are not always visible immediately.
+
+If the values still match, rerun the manual build with `debug-oidc-claims=true`. The debug step does not print the token. It prints the GitHub context and selected OIDC claims so you can compare the principal Google Cloud is evaluating. For the shared setup, `oidc.repository` must be exactly one of:
+
+```text
+project-pareto/pareto-ui
+MichaelPesce/pareto-ui
+```
+
+The debug step also prints `oidc.ref` and `oidc.job_workflow_ref`, which are useful if the provider condition is later tightened to a specific branch, tag, or reusable workflow.
 
 ## 3. Create A Separate Service Account Or Provider
 
@@ -547,9 +605,9 @@ If the renewed certificate reuses the same KMS key version, the KMS resource nam
 
 | Symptom | Checks |
 | --- | --- |
-| OIDC authentication fails | Confirm `id-token: write`, the exact provider resource name, repository spelling and case, and the provider attribute condition. Allow several minutes after IAM changes. |
+| OIDC authentication fails | Confirm `id-token: write`, the exact provider resource name, repository spelling and case, and the provider attribute condition. The provider resource must use project number `150534288369`, not project ID `uds-windows-development`. Allow several minutes after IAM changes. |
 | Windows signing configuration is incomplete | Add all four `GCP_CODE_SIGNING_*` repository variables, add matching certificate secrets, or run the workflow with `sign-distribution=false`. |
-| `iam.serviceAccounts.getAccessToken` is denied | Confirm the provider condition allows the exact caller repository and that the service account has a `roles/iam.workloadIdentityUser` binding for that repository using the full pool resource name. This is a service-account impersonation problem, not a KMS permission problem. |
+| `iam.serviceAccounts.getAccessToken` is denied | Confirm the workflow run is in `project-pareto/pareto-ui` or `MichaelPesce/pareto-ui`, the GitHub variables in that repo point at `projects/150534288369/locations/global/workloadIdentityPools/pareto-github-actions/providers/pareto-ui-windows-code-signing`, and the service account has a `roles/iam.workloadIdentityUser` binding for that exact repository. This is a service-account impersonation problem, not a KMS permission problem. |
 | KMS permission is denied | Confirm the service account has `roles/cloudkms.signerVerifier` on the correct key and that the configured key version is enabled. |
 | Jsign checksum fails | Update `JSIGN_SHA256` only after intentionally changing `JSIGN_VERSION` and verifying the downloaded JAR out of band. |
 | Jsign cannot find the Google Cloud key | Confirm `GCP_CODE_SIGNING_KMS_KEY_VERSION` is the full key-version resource. The workflow parses it into Jsign `--keystore projects/PROJECT/locations/LOCATION/keyRings/KEYRING` and `--alias KEY/cryptoKeyVersions/VERSION`. |
