@@ -42,9 +42,17 @@ facility removes references that no longer apply. Geometry controls mapped pipe
 directions; table-only routes remain available in tables.
 
 Exports use the saved workbook. Validation and optimization use temporary input
-snapshots from the same canonical data. Changes invalidate old validation; stale
+snapshots from the same canonical data. Input changes refresh deterministic issues
+and table highlights while invalidating old model/feasibility evidence; stale
 edits and edits during optimization are rejected. The UI waits for save
 confirmation and provides an error/reload action on failure.
+
+Section autofill derives eligible missing/invalid numeric cells from the same
+requirements, independently of the 250 displayed-issue limit. Preview lists counts
+and units by table. Apply checks the input revision and all value bounds before
+saving through the canonical workbook/map synchronization path. Valid cells and
+structural issues are preserved; malformed or ambiguous table layouts require
+manual repair. Model defaults change only when the user explicitly fills them.
 
 An explicit `TimePeriods` sheet preserves the horizon even without completions
 pads. Compatibility headers remain in `CompletionsDemand` for the parent reader.

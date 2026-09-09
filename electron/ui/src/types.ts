@@ -245,7 +245,7 @@ export interface ScenarioValidation {
   truncated?: boolean;
   model_check?: string;
   feasibility?: string;
-  sections?: Array<{id: string; title: string; error_count: number; warning_count: number}>;
+  sections?: Array<{id: string; title: string; error_count: number; warning_count: number; fillable_count?: number}>;
   units?: Record<string, string>;
   periods?: string[];
   valid?: boolean | null;
@@ -266,6 +266,14 @@ export interface ValidationIssue {
   row?: string[];
   period?: string | null;
   area?: string;
+  help?: {rule: string; steps: string[]} | null;
+}
+
+export interface ScenarioFillPreview {
+  revision: string;
+  value: number;
+  cell_count: number;
+  tables: Array<{name: string; cell_count: number; unit: string}>;
 }
 
 export interface OverrideEntry {

@@ -134,6 +134,12 @@ export const generateExcelFromMap = (backend_port: number, id: number | string) 
 export const getScenarioReadiness = (port: number, id: number | string, signal?: AbortSignal) =>
     fetch(`${BACKEND_URL}:${port}/scenario_readiness/${id}`, {signal});
 
+export const fillScenarioInputs = (port: number, id: number, payload: {
+    section: string; revision: string; value: number; apply: boolean;
+}) => fetch(`${BACKEND_URL}:${port}/fill_scenario_inputs/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+});
+
 export const checkScenarioFeasibility = (port: number, id: number | string) =>
     fetch(`${BACKEND_URL}:${port}/scenario_feasibility/${id}`, {method: 'POST'});
 

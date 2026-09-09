@@ -106,6 +106,25 @@ def planning_horizon(scenario_id: int, payload: dict = Body(...)):
             raise HTTPException(400, detail=str(error)) from error
 
 
+@router.post('/fill_scenario_inputs/{scenario_id}')
+def fill_scenario_inputs(scenario_id: int, payload: dict = Body(...)):
+    from app.internal.scenario_fill import prepare_fill
+    with scenario_handler._db_lock:
+        scenario_handler.ensure_editable(scenario_id)
+        current = scenario_handler.get_scenario(scenario_id)
+        if payload.get('revision') != current['input_revision']:
+            raise HTTPException(409, detail='Inputs changed. Refresh completion and preview the fill again.')
+        try:
+            updated, preview = prepare_fill(current, payload.get('section'), payload.get('value'))
+            if payload.get('apply') is True:
+                if not preview['cell_count']:
+                    raise ValueError('There are no eligible cells to fill in this section.')
+                return scenario_handler.save_inputs(updated)
+            return preview
+        except ValueError as error:
+            raise HTTPException(400, detail=str(error)) from error
+
+
 @router.post("/advance_to_optimization_setup/{scenario_id}")
 async def advance_to_optimization_setup(scenario_id: int):
     """
@@ -115,7 +134,7 @@ async def advance_to_optimization_setup(scenario_id: int):
         scenario_handler.ensure_editable(scenario_id)
         current = scenario_handler.get_scenario(scenario_id)
         validation = current.get('validation', {})
-        if not validation.get('valid') or validation.get('revision') != current['input_revision']:
+        if not validation.get('valid') or validation.get('model_check') != 'passed' or validation.get('revision') != current['input_revision']:
             raise HTTPException(409, detail='Validate the current inputs before advancing to optimization setup.')
         updated_scenario = scenario_handler.set_scenario_status(scenario_id, "Draft")
         return {"data": updated_scenario}

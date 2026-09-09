@@ -45,6 +45,7 @@ The **Complete Scenario Inputs** sidebar item sits between **PARETO Input File**
 (or **Input Summary**) and **Network Diagram**, and remains available in network view.
 Its issue links open the affected map feature or table; the checklist has its own
 page so it does not take space above tables.
+Use the **info icon** beside a network issue for its rule and repair steps.
 Enter or review these inputs; the template supplies some defaults:
 
 | Input table | What to enter or review |
@@ -61,6 +62,14 @@ Enter or review these inputs; the template supplies some defaults:
 Use **Fill forecast values → Preview changes → Apply changes** to fill selected
 facilities/periods with a constant. It fills blanks by default. Save other edits
 and wait for saving to finish before validating.
+
+For a completion section such as **Costs and assumptions**, choose **Autofill
+flagged cells**, enter a value, then **Preview autofill**. Review the affected
+tables, cell counts, and units before **Apply autofill**. This fills missing or
+invalid numeric cells, including blanks using defaults, and preserves valid values.
+Use individual tables when different values are needed. Network connections and
+capacity shortfalls still require review. After saving, resolved table highlights
+clear automatically; remaining issues stay highlighted.
 
 **Practice example:** use `T01, T02`, production of 100 bbl/day in both periods,
 and 100 bbl/day for both pipes, the connecting node, and disposal. Use disposal
@@ -99,7 +108,8 @@ separate check that does not allow unmet water requirements.
 In **Optimization Setup**, start with **Minimize Cost**, **CBC**, input pipeline
 capacities, distance-based pipeline cost, and advanced modes off. Keep the existing
 scaling, runtime, and gap defaults, then click **Optimize**. Changed settings are
-checked again before the run; input edits invalidate earlier validation.
+checked again before the run; input edits refresh the checklist and invalidate
+earlier model and feasibility checks.
 
 Open **Model Results → Generate Excel Report** when finished. A feasible result at
 the time limit is not a proven optimum. For failures, review the reported stage

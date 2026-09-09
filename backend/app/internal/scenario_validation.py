@@ -11,8 +11,9 @@ import threading
 from pareto.utilities.process_data import get_valid_piping_arc_list, get_valid_trucking_arc_list
 from .input_schema import NODE_SETS, OPTION_SETS, FORECASTS, flat_table, dimension_count, input_revision
 from .util import prepare_config
+from .validation_help import network_help
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 MODEL_LOCK = threading.Lock()
 ARC_SETS = dict(zip('PCNKSRFO', ('ProductionPads', 'CompletionsPads', 'NetworkNodes', 'SWDSites',
                                  'StorageSites', 'TreatmentSites', 'ExternalWaterSources', 'ReuseOptions')))
@@ -52,18 +53,22 @@ def numeric(value):
     except (TypeError, ValueError):
         return None
 
-def validate_inputs(scenario):
+def validate_inputs(scenario, *, fill_targets=None):
     data = scenario.get('data_input') or {}
     sets, tables = data.get('df_sets') or {}, data.get('df_parameters') or {}
     periods = sets.get('TimePeriods', [])
     units = data.get('units') or {}
     flat = {key: flat_table(table) for key, table in tables.items()}
-    issues, counts = [], Counter()
+    issues, counts, error_tables = [], Counter(), set()
+    # Collect every eligible cell, independently of the displayed issue limit.
+    targets = fill_targets if fill_targets is not None else {}
     legacy_excel = data.get('origin', 'map' if data.get('map_data') else 'excel') == 'excel'
     rate_unit = f"{units.get('volume', 'bbl')}/{units.get('time', 'day')}"
 
     def issue(code, section, message, table=None, row=(), period=None, severity='error', actual=None, expected=None):
         counts[(section, severity)] += 1
+        if severity == 'error' and table:
+            error_tables.add(table)
         if len(issues) >= 250 and severity == 'error':
             warning = next((i for i, item in enumerate(issues) if item['severity'] == 'warning'), None)
             if warning is not None:
@@ -71,16 +76,21 @@ def validate_inputs(scenario):
         if len(issues) < 250:
             issues.append({'code': code, 'section': section, 'severity': severity, 'message': message,
                            'table': table, 'row': list(row), 'period': period, 'actual': actual,
-                           'expected': expected, 'area': 'map' if section == 'network' else 'table'})
+                           'expected': expected, 'area': 'map' if section == 'network' else 'table',
+                           'help': network_help(code, table, row, sets)})
 
     def require(table, keys, section, default='', minimum=0, maximum=math.inf, period=None):
         value = flat.get(table, {}).get(tuple(keys), '')
+        number = numeric(value)
+        invalid_reuse = table == 'ReuseCapacity' and number is not None and -1 < number < 0
+        if number is None or not minimum <= number <= maximum or invalid_reuse:
+            targets[(table, tuple(keys))] = {'table': table, 'keys': tuple(keys), 'section': section,
+                                            'minimum': minimum, 'maximum': maximum}
         if value in ('', None):
             issue('default_used' if default else 'missing_value', section,
                   f"{table}: {' / '.join(keys)} is blank. " + (f"The model uses {default}; review this assumption." if default else 'Enter a value, including an explicit zero when appropriate.'),
                   table, keys[:1] if period else keys, period, 'warning' if default else 'error')
             return None
-        number = numeric(value)
         if number is None or not minimum <= number <= maximum:
             expected = f'a finite number ≥ {minimum}' if maximum == math.inf else f'a number from {minimum} to {maximum}'
             issue('invalid_value', section, f"{table}: {' / '.join(keys)} must be {expected}.", table, keys[:1] if period else keys,
@@ -277,8 +287,11 @@ def validate_inputs(scenario):
             'revision': input_revision(scenario), 'catalog_version': CATALOG_VERSION,
             'model_version': version('project-pareto'), 'issues': issues, 'error_count': errors,
             'warning_count': warnings, 'truncated': errors + warnings > len(issues),
+            'tables_with_issues': sorted(error_tables),
             'sections': [{'id': section, 'title': title, 'error_count': counts[(section, 'error')],
-                          'warning_count': counts[(section, 'warning')]} for section, title in SECTION_NAMES.items()],
+                          'warning_count': counts[(section, 'warning')],
+                          'fillable_count': sum(t['section'] == section for t in targets.values())}
+                         for section, title in SECTION_NAMES.items()],
             'units': units, 'periods': periods, 'model_check': 'not_run', 'feasibility': 'not_run'}
 
 def check_model(scenario, path, result, solve=False):

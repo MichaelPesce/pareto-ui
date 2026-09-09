@@ -5,6 +5,7 @@ import {useScenario} from '../../context/ScenarioContext';
 import {getScenarioReadiness, savePlanningHorizon} from '../../services/app.service';
 import type {Scenario, ScenarioValidation, ValidationIssue} from '../../types';
 import ValidationIssues from '../ScenarioValidationDialog/ValidationIssues';
+import IssueFill from './IssueFill';
 
 export default function ScenarioCompletion({scenario, disabled, onSelect}: {
   scenario: Scenario; disabled: boolean; onSelect: (issue: ValidationIssue) => void;
@@ -43,6 +44,7 @@ export default function ScenarioCompletion({scenario, disabled, onSelect}: {
   };
   const periods = periodText.split(/[\n,]+/).map(t => t.trim()).filter(Boolean);
   const removed = (readiness?.periods || []).filter(period => !periods.includes(period));
+  const selectedSection = readiness?.sections?.find(item => item.id === section);
   const savePeriods = async () => {
     setSaving(true); setError(null);
     try {
@@ -73,7 +75,13 @@ export default function ScenarioCompletion({scenario, disabled, onSelect}: {
           variant={section === item.id ? 'filled' : 'outlined'}
           onClick={() => setSection(section === item.id ? null : item.id)} />)}
       </Box>
-      {section && <ValidationIssues issues={(readiness.issues || []).filter(issue => issue.section === section)} onSelect={selectIssue} />}
+      {section && <>
+        {!!selectedSection?.fillable_count && readiness.revision && <IssueFill key={`${scenario.id}-${section}`}
+          port={port} scenarioId={scenario.id} revision={readiness.revision} section={section}
+          title={selectedSection.title} count={selectedSection.fillable_count} disabled={disabled || saving}
+          onSaved={acceptSavedScenario} />}
+        <ValidationIssues issues={(readiness.issues || []).filter(issue => issue.section === section)} onSelect={selectIssue} />
+      </>}
       {readiness.truncated && <Typography variant="caption">Showing the first issues. Completion counts include all checked inputs.</Typography>}
     </>}
     <Dialog open={periodsOpen} onClose={() => !saving && setPeriodsOpen(false)} fullWidth maxWidth="sm">

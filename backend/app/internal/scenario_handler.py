@@ -159,7 +159,9 @@ class ScenarioHandler:
         revision = input_revision(scenario)
         scenario['input_revision'] = revision
         if scenario.get('validation', {}).get('revision') != revision:
-            scenario['validation'] = {'valid': None, 'state': 'not_checked', 'revision': revision, 'issues': []}
+            from .scenario_validation import validate_inputs
+            # Refresh all input issues; previous build/solver evidence is stale.
+            scenario['validation'] = validate_inputs(scenario)
 
         query = tinydb.Query()
         self._db.upsert(

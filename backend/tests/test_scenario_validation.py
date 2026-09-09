@@ -57,6 +57,23 @@ class ScenarioValidationTests(unittest.TestCase):
         result = validate_inputs(scenario)
         self.assertFalse(result['valid'])
         self.assertTrue(any(i['code'] == 'unreachable_destination' and i['row'] == ['P1'] for i in result['issues']))
+        help_text = next(i['help'] for i in result['issues'] if i['code'] == 'unreachable_destination')
+        self.assertIn('trucking', help_text['rule'])
+        self.assertIn('intermediate', ' '.join(help_text['steps']))
+        self.assertIn('PadRates', ' '.join(help_text['steps']))
+
+    def test_route_help_matches_supported_trucking_and_treatment_paths(self):
+        scenario = deepcopy(self.example)
+        tables = scenario['data_input']['df_parameters']
+        tables['NKA'] = {}
+        tables['PKT'] = {'ProductionPads': ['P1'], 'K1': [1]}
+        self.assertFalse(any(i['code'] == 'unreachable_destination' for i in validate_inputs(scenario)['issues']))
+        tables['PKT'] = {}
+        scenario['data_input']['df_sets']['TreatmentSites'] = ['R1']
+        tables['PRT'] = {'ProductionPads': ['P1'], 'R1': [1]}
+        self.assertTrue(any(i['code'] == 'unreachable_destination' for i in validate_inputs(scenario)['issues']))
+        tables['RKT'] = {'TreatmentSites': ['R1'], 'K1': [1]}
+        self.assertFalse(any(i['code'] == 'unreachable_destination' for i in validate_inputs(scenario)['issues']))
 
     def test_revision_tracks_settings_and_fixed_decisions_but_not_results(self):
         scenario = deepcopy(self.example)
