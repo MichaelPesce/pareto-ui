@@ -11,7 +11,7 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import PopupModal from '../../components/PopupModal/PopupModal';
 import AddIcon from '@mui/icons-material/Add';
-import { advanceToOptimizationSetup, generateExcelFromMap, validateScenario } from '../../services/app.service';
+import { advanceToOptimizationSetup, generateExcelFromMap, validateScenario, checkScenarioFeasibility } from '../../services/app.service';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AIPromptDialog from '../AIPromptDialog/AIPromptDialog';
 import { useAIPrompt } from '../../context/AIPromptContext';
@@ -113,8 +113,8 @@ export default function Bottombar(props) {
     },[scenario])
     
 
-    const handleSaveModal = () => {
-        handleUpdateExcel(scenario.id, category, scenario.data_input.df_parameters[category])
+    const handleSaveModal = async () => {
+        if (await handleUpdateExcel(scenario.id, category, scenario.data_input.df_parameters[category]) === false) return;
         handleCloseSaveModal()
         setInputDataEdited(false)
         handleSelection(key)
@@ -181,7 +181,7 @@ export default function Bottombar(props) {
           })
       }
 
-      const handleValidateScenario = () => {
+      const handleValidateScenario = (solve = false) => {
         if (!id) {
           setValidationError("No scenario selected.")
           setValidationResult(null)
@@ -191,8 +191,8 @@ export default function Bottombar(props) {
         setValidationLoading(true)
         setValidationError(null)
         setValidationResult(null)
-        setOpenValidationDialog(true)
-        validateScenario(port, id)
+        setOpenValidationDialog(true);
+        (solve ? checkScenarioFeasibility(port, id) : validateScenario(port, id))
           .then((response) => {
             if (!response.ok) {
               setValidationError(`Validation failed (${response.status}).`)
@@ -249,7 +249,8 @@ export default function Bottombar(props) {
 
       const validateScenarioButton = <Button
                                 sx={styles.unfilled}
-                                onClick={handleValidateScenario}
+                                onClick={() => handleValidateScenario()}
+                                disabled={props.saving || inputDataEdited || backgroundTasks?.includes(id)}
                                 variant="outlined"
                                 size="large"
                                 startIcon={<FactCheckIcon /> }
@@ -313,7 +314,7 @@ export default function Bottombar(props) {
                             sx={styles.filled}
                             variant="contained"
                             size="large"
-                            disabled={disableOptimize ? true : false}
+                            disabled={disableOptimize || props.saving || inputDataEdited}
                             endIcon={<ArrowForwardIcon /> }
                           >
                             Optimize
@@ -325,7 +326,7 @@ export default function Bottombar(props) {
                             sx={styles.filled}
                             variant="contained"
                             size="large"
-                            disabled={disableOptimize ? true : false}
+                            disabled={disableOptimize || props.saving || inputDataEdited}
                             endIcon={<ArrowForwardIcon />}
                           >
                             Re-run Optimization
@@ -390,6 +391,8 @@ export default function Bottombar(props) {
         result={validationResult}
         onAdvance={handleAdvanceToOptimizationSetup}
         onSelectTable={handleSelectValidationTable}
+        onCheckFeasibility={() => handleValidateScenario(true)}
+        onSelectIssue={issue => { setOpenValidationDialog(false); props.focusInputIssue?.(issue); }}
         onClose={handleCloseValidationDialog}
       />
     </Box>

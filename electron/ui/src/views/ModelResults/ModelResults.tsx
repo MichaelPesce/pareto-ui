@@ -1,7 +1,7 @@
 import ConstraintDiagnostics from "./ConstraintDiagnostics";
 import React from 'react';
 import {useEffect, useState, type ChangeEvent} from 'react';   
-import { Box, Grid, LinearProgress, Button } from '@mui/material';
+import { Alert, Box, Grid, LinearProgress, Button } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SankeyPlot from './SankeyPlot';
 import KPIDashboard from './KPIDashboard';
@@ -528,6 +528,8 @@ const handleNewInfrastructureOverride = () => {
   
   return ( 
     <Box sx={{pb: 12}}>
+    {props.scenario.results.solution_status === 'feasible' && <Alert severity="warning" sx={{mx: 3, mb: 2}}>A feasible solution was found. The solver stopped before proving optimality.</Alert>}
+    {props.scenario.results.status === 'failure' && props.scenario.results.failure_stage && <Alert severity="error" sx={{mx: 3, mb: 2}}>The run failed during {props.scenario.results.failure_stage.toLowerCase()}.</Alert>}
     {/*
       if a scenario has been optimized, show outputs
       otherwise, display the status of the optimization

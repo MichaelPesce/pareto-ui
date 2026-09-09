@@ -8,6 +8,43 @@ from app.internal.ExcelApi import WriteMapDataToExcel, determineConnectionsFromA
 
 
 class MapExportTests(unittest.TestCase):
+    def test_forecasts_trucking_and_treatment_streams_survive_map_reorder(self):
+        from app.internal.get_data import get_data
+        data = {'ProductionPads': {'P1': {}, 'P2': {}}, 'SWDSites': {'K1': {}},
+                'TreatmentSites': {'R1': {}}, 'ReuseOptions': {'O1': {}},
+                'connections': {'all_connections': {'R1': ['O1']}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            target = str(Path(tmp) / 'map')
+            WriteMapDataToExcel(data, target)
+            wb = load_workbook(target + '.xlsx')
+            wb['PadRates']['B3'] = 100; wb['PadRates']['B4'] = 200
+            wb['PKT']['B3'] = 1; wb['ROA']['B3'] = 2
+            wb.save(target + '.xlsx'); wb.close()
+            data['ProductionPads'] = {'P2': {}, 'P1': {}, 'P3': {}}
+            data['time_periods'] = ['T02', 'T01', 'T53']
+            WriteMapDataToExcel(data, target, target + '.xlsx')
+            sets, params, _ = get_data(target + '.xlsx')
+            self.assertEqual(list(sets['TimePeriods']), ['T02', 'T01', 'T53'])
+            self.assertEqual(params['PadRates'], {('P1', 'T01'): 100, ('P2', 'T01'): 200})
+            self.assertEqual(params['PKT'], {('P1', 'K1'): 1})
+            self.assertEqual(params['ROA'], {('R1', 'O1'): 2})
+            self.assertEqual(len(sets['CompletionsPads']), 0)
+
+    def test_capacity_entered_in_table_survives_unrelated_map_save(self):
+        data = {'ProductionPads': {'P1': {}}, 'NetworkNodes': {'N1': {}},
+                'connections': {'all_connections': {'P1': ['N1']},
+                                'connection_metadata': {'P1::N1': {'pipeline_capacity': 14286}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            target = str(Path(tmp) / 'map')
+            WriteMapDataToExcel(data, target)
+            wb = load_workbook(target + '.xlsx')
+            wb['InitialPipelineCapacity']['B3'] = 123
+            wb.save(target + '.xlsx'); wb.close()
+            WriteMapDataToExcel(data, target, target + '.xlsx')
+            wb = load_workbook(target + '.xlsx')
+            self.assertEqual(wb['InitialPipelineCapacity']['B3'].value, 123)
+            wb.close()
+
     def test_expansion_defaults_survive_reorder_and_only_fill_new_entries(self):
         data = {'StorageSites': {'S1': {}, 'S2': {}}, 'SWDSites': {'K1': {}, 'K2': {}},
                 'TreatmentSites': {'R1': {}}, 'NetworkNodes': {'N1': {}},

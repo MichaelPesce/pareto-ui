@@ -4,14 +4,8 @@ import functools
 
 import logging
 
-from pareto.utilities.process_data import (
-    check_required_data,
-    model_infeasibility_detection,
-)
 from pareto.strategic_water_management.strategic_produced_water_optimization import (
-    create_model,
     Objectives,
-    solve_model,
     PipelineCost,
     PipelineCapacity,
     Hydraulics,
@@ -23,7 +17,6 @@ from pareto.strategic_water_management.strategic_produced_water_optimization imp
     CONFIG,
 )
 
-from app.internal.get_data import get_input_lists, get_data
 
 _log = logging.getLogger(__name__)
 EARTH_RADIUS_MILES = 3958.7613
@@ -120,102 +113,6 @@ def _to_float(value):
     except (TypeError, ValueError):
         return None
 
-
-def _get_table_row_count(table_data):
-    if not isinstance(table_data, dict):
-        return 0
-
-    for values in table_data.values():
-        if isinstance(values, list):
-            return len(values)
-
-    return 0
-
-
-def _coerce_numeric_or_zero(value):
-    if value in (None, ""):
-        return 0.0
-
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _forecast_table_has_valid_rows(table_data, allow_zero=False, require_all_cells_numeric=False):
-    row_count = _get_table_row_count(table_data)
-    if row_count == 0:
-        return False
-
-    period_columns = [
-        key for key, values in table_data.items()
-        if key.startswith("T") and isinstance(values, list)
-    ]
-
-    if not period_columns:
-        list_columns = [
-            key for key, values in table_data.items()
-            if isinstance(values, list)
-        ]
-        period_columns = list_columns[1:]
-
-    if not period_columns:
-        return False
-
-    for row_idx in range(row_count):
-        if allow_zero:
-            for column in period_columns:
-                column_values = table_data.get(column, [])
-                value = column_values[row_idx] if row_idx < len(column_values) else None
-                if value in (None, ""):
-                    if require_all_cells_numeric:
-                        return False
-                    continue
-                numeric_value = _to_float(value)
-                if numeric_value is None or numeric_value < 0:
-                    return False
-            if require_all_cells_numeric:
-                continue
-
-            has_numeric_value = any(
-                _to_float(table_data.get(column, [])[row_idx]) is not None
-                for column in period_columns
-                if row_idx < len(table_data.get(column, [])) and table_data.get(column, [])[row_idx] not in (None, "")
-            )
-            if not has_numeric_value:
-                return False
-        else:
-            row_total = sum(
-                _coerce_numeric_or_zero(table_data.get(column, [])[row_idx] if row_idx < len(table_data.get(column, [])) else 0)
-                for column in period_columns
-            )
-            if row_total <= 0:
-                return False
-
-    return True
-
-
-def _value_table_has_valid_rows(table_data, allow_zero=False):
-    row_count = _get_table_row_count(table_data)
-    if row_count == 0:
-        return False
-
-    values = table_data.get("VALUE")
-    if not isinstance(values, list):
-        return False
-
-    for row_idx in range(row_count):
-        value = values[row_idx] if row_idx < len(values) else None
-        numeric_value = _to_float(value)
-        if numeric_value is None:
-            return False
-        if allow_zero:
-            if numeric_value < 0:
-                return False
-        elif numeric_value <= 0:
-            return False
-
-    return True
 
 def calculate_distance_from_coordinates(start_coords, end_coords):
     """
@@ -569,226 +466,9 @@ def summarize_long_text(text, start_chars=6000, end_chars=4000):
         f"{text[-end_chars:]}"
     )
 
-def deriveConnections(input_data: dict):
-    ## From Arc tables, derive a dictionary of node -> [list of nodes] connections
-    # _log.info(f"deriving connections")
-    params = input_data.get("df_parameters")
-    connections = {}
-    for arc_table_name in ARC_TABLES:
-        try:
-            i = 0
-            arc_table_key = ARC_TABLES[arc_table_name]
-            arc_table = params.get(arc_table_name, [])
-            vertical_nodes = arc_table[arc_table_key]
-            for col in arc_table:
-                if i > 0: # skip first column
-                    ## col = arc_table_key
-                    values = arc_table[col]
-                    horizontal_node = col
-                    for j in range(len(values)):
-                        val = values[j]
-                        if val is not None and val != "":
-                            vertical_node = vertical_nodes[j]
-
-                            vertical_node_connections = connections.get(vertical_node, [])
-                            vertical_node_connections.append(horizontal_node)
-                            connections[vertical_node] = vertical_node_connections
-                            ## TODO: Add reverse connection as well?
-                i += 1
-        except Exception as e:
-            _log.info(f"failed to derive connections from table {arc_table_name}: {e}")
-    _log.info(f"connections: {connections}")
-    return connections
-
-def checkArcValues(input_table: dict, connections: dict, input_table_key: str = "NODES") -> bool:
-    # _log.info(f"checking arc values")
-    
-    if input_table_key not in input_table:
-        _log.info(f"missing input_table_key '{input_table_key}' in input_table")
-        return False
-
-    row_labels = input_table.get(input_table_key, [])
-    if not isinstance(row_labels, list):
-        _log.info(f"input_table_key '{input_table_key}' is not a list")
-        return False
-
-    row_index = {label: i for i, label in enumerate(row_labels)}
-    missing_any = False
-
-    for row_label, expected_cols in connections.items():
-        if row_label not in row_index:
-            _log.info(f"missing row '{row_label}' in input_table '{input_table_key}'")
-            missing_any = True
-            continue
-
-        if not isinstance(expected_cols, list):
-            expected_cols = [expected_cols]
-
-        row_i = row_index[row_label]
-        for col_label in expected_cols:
-            if col_label not in input_table:
-                _log.info(f"missing column '{col_label}' for row '{row_label}'")
-                missing_any = True
-                continue
-
-            col_values = input_table.get(col_label, [])
-            if row_i >= len(col_values):
-                _log.info(
-                    f"missing value at row '{row_label}' (index {row_i}) column '{col_label}': column shorter than rows"
-                )
-                missing_any = True
-                continue
-
-            val = col_values[row_i]
-            if val is None or val == "":
-                _log.info(f"missing connection value at row '{row_label}' column '{col_label}' (index {row_i})")
-                missing_any = True
-
-    return not missing_any
-
-@time_it
-def check_for_infeasibility(scenario, excel_path):
-    ## TODO: this fails on get_data
-    ## we may need to create our own function to check for valid tables
-    modelParameters = prepare_config(scenario, expected_response="modelParameters")
-    default={
-        "objective": Objectives[modelParameters["objective"]],
-        "pipeline_cost": PipelineCost[modelParameters["pipeline_cost"]],
-        "pipeline_capacity": PipelineCapacity[modelParameters["pipeline_capacity"]],
-        "node_capacity": modelParameters["node_capacity"],
-        "water_quality": WaterQuality[modelParameters["water_quality"]],
-        "hydraulics": Hydraulics[modelParameters["hydraulics"]],
-        "removal_efficiency_method": RemovalEfficiencyMethod[modelParameters["removal_efficiency_method"]],
-        "infrastructure_timing": InfrastructureTiming[modelParameters["infrastructure_timing"]],
-        "subsurface_risk": SubsurfaceRisk[modelParameters["subsurface_risk"]],
-        "desalination_model": DesalinationModel[modelParameters["desalination_model"]]
-    }
-
-    [set_list, parameter_list] = get_input_lists()
-    
-    [df_sets, df_parameters, _] = get_data(excel_path, set_list, parameter_list)
-
-    strategic_model = create_model(
-        df_sets,
-        df_parameters,
-        default=default
-    )
-
-    try:
-        _log.info(f"calling model_infeasibility_detection")
-        strategic_model = model_infeasibility_detection(strategic_model)
-        return True
-    except Exception as e:
-        _log.info(f"Exception during check_for_infeasibility: {e}")
-        return False
-
-
-def check_for_minimum_required_tables(scenario):
-    required_tables = [
-        "ProductionPads",
-        "CompletionsPads",
-        "StorageSites",
-        "SWDSites",
-        "ExternalWaterSources",
-    ]
-
-    data_input = scenario.get("data_input", {})
-    df_sets = data_input.get("df_sets", {})
-    df_parameters = data_input.get("df_parameters", {})
-
-    missing_tables = []
-
-    for table_name in required_tables:
-        table = df_sets.get(table_name, [])
-        if len(table) == 0:
-            missing_tables.append(table_name)
-
-    
-    ## The following lists of tables must have values > 0 for each row in each table
-    forecast_tables = [
-        {"table_name": "CompletionsDemand", "allow_zero": False},
-        {"table_name": "PadRates", "allow_zero": False},
-        {"table_name": "FlowbackRates", "allow_zero": False},
-    ]
-
-    capacity_tables = [
-        {"table_name": "InitialDisposalCapacity", "allow_zero": False},
-        # "InitialTreatmentCapacity" TODO: this one is different
-    ]
-    capacity_tables.extend([
-        {"table_name": "InitialStorageCapacity", "allow_zero": True},
-        {"table_name": "CompletionsPadStorage", "allow_zero": True},
-    ])
-
-    operational_cost_tables = [
-        {"table_name": "DisposalOperationalCost", "allow_zero": False},
-    ]
-
-    # Beneficial reuse is optional. When present, zero minimum flow, cost, or
-    # credit is valid; negative or nonnumeric values are not.
-    beneficial_reuse_tables = []
-    if df_sets.get("ReuseOptions"):
-        forecast_tables.append({"table_name": "ReuseMinimum", "allow_zero": True, "require_all_cells_numeric": True})
-        beneficial_reuse_tables = [
-            {"table_name": "BeneficialReuseCost", "allow_zero": True},
-            {"table_name": "BeneficialReuseCredit", "allow_zero": True},
-        ]
-
-    ## TODO: Trucking Time, Trucking Hours, External Water Sourcing
-    ## - do we need these?
-    ## FCT, CKT, also seem to be necessary
-
-    for table_config in forecast_tables:
-        table_name = table_config["table_name"]
-        if not _forecast_table_has_valid_rows(
-            df_parameters.get(table_name),
-            allow_zero=table_config["allow_zero"],
-            require_all_cells_numeric=table_config.get("require_all_cells_numeric", False),
-        ):
-            missing_tables.append(table_name)
-
-    for table_config in capacity_tables:
-        table_name = table_config["table_name"]
-        if not _value_table_has_valid_rows(df_parameters.get(table_name), allow_zero=table_config["allow_zero"]):
-            missing_tables.append(table_name)
-
-    for table_config in operational_cost_tables:
-        table_name = table_config["table_name"]
-        if not _value_table_has_valid_rows(df_parameters.get(table_name), allow_zero=table_config["allow_zero"]):
-            missing_tables.append(table_name)
-
-    for table_config in beneficial_reuse_tables:
-        table_name = table_config["table_name"]
-        if not _value_table_has_valid_rows(df_parameters.get(table_name), allow_zero=table_config["allow_zero"]):
-            missing_tables.append(table_name)
-    
-    return missing_tables
-
-
-def check_for_missing_tables(scenario):
-    conf = prepare_config(scenario)
-    data_input = scenario.get("data_input")
-    df_sets = data_input.get("df_sets", {})
-    df_parameters = data_input.get("df_parameters", {})
-    display_units = data_input.get("display_units", {})
-    df_parameters["Units"] = display_units
-    try:
-        _log.info(f"calling check_required_data")
-        check_required_data(df_sets, df_parameters, conf)
-        _log.info(f"no error thrown")
-        return {
-            "result": True,
-        }
-    except Exception as e:
-        _log.info(f"{e}")
-        return {
-            "result": False,
-            "e": e,
-        }
-
 def prepare_config(scenario, expected_response="conf"):
     _log.info(f"preparing config: ")
-    optimizationSettings = scenario.get('optimization')
+    optimizationSettings = scenario.get('optimization') or {}
     modelParameters = {
         "objective": optimizationSettings.get('objective',"cost"),
         "runtime": optimizationSettings.get('runtime',900),
@@ -817,6 +497,8 @@ def prepare_config(scenario, expected_response="conf"):
         "water_quality": modelParameters["water_quality"],
         "removal_efficiency_method": modelParameters["removal_efficiency_method"],
         "infrastructure_timing": modelParameters["infrastructure_timing"],
+        "subsurface_risk": modelParameters["subsurface_risk"],
+        "desalination_model": modelParameters["desalination_model"],
     }
 
     if expected_response == "conf":

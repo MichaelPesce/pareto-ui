@@ -1,171 +1,45 @@
 import React from 'react';
-import {
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Button,
-  Typography,
-  CircularProgress,
-  Box,
-  Divider
-} from '@mui/material';
-import type { ScenarioValidation } from '../../types';
+import {Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Typography} from '@mui/material';
+import type {ScenarioValidation, ValidationIssue} from '../../types';
+import ValidationIssues from './ValidationIssues';
 
-interface ValidationResult extends ScenarioValidation {}
+const STATES: Record<string, string> = {
+  needs_input: 'Scenario inputs need attention.', inputs_complete: 'Required inputs are complete.',
+  model_built: 'The selected model builds successfully. Feasibility has not been tested.',
+  feasible: 'A feasible plan was found with slack variables disabled.',
+  infeasible: 'The solver found this scenario infeasible with slack variables disabled.',
+  not_determined: 'Feasibility has not been determined.', build_failed: 'The selected model could not be built.',
+  outdated: 'Inputs changed during the check. Validate the current scenario again.',
+};
 
-interface ScenarioValidationDialogProps {
-  open: boolean;
-  loading: boolean;
-  advancing?: boolean;
-  error: string | null;
-  result: ValidationResult | null;
-  onAdvance?: () => void;
-  onSelectTable?: (tableName: string) => void;
-  onClose: () => void;
-}
-
-export default function ScenarioValidationDialog(props: ScenarioValidationDialogProps): JSX.Element {
-  const { open, loading, advancing = false, error, result, onAdvance, onSelectTable, onClose } = props;
-  const missingTables = result?.missing_tables ?? [];
-  const tablesWithIssues = result?.tables_with_issues ?? [];
-  const isValid = Boolean(result?.valid);
-  const checkMissingTablesPassed = result?.check_for_missing_tables;
-  const checkMinimumRequiredPassed = result?.check_for_minimum_required_tables;
-  const checkInfeasibilityPassed = result?.check_for_infeasibility;
-
-  const checkTwoDidNotRun = checkMissingTablesPassed === false;
-  const checkThreeDidNotRun = checkTwoDidNotRun || checkMinimumRequiredPassed === false;
-
-  type CheckState = 'passed' | 'failed' | 'not_run';
-  const getCheckState = (passed: boolean | undefined, didNotRun: boolean): CheckState => {
-    if (didNotRun) {
-      return 'not_run';
-    }
-    if (passed === true) {
-      return 'passed';
-    }
-    if (passed === false) {
-      return 'failed';
-    }
-    return 'not_run';
-  };
-
-  const checkOneState = getCheckState(checkMissingTablesPassed, false);
-  const checkTwoState = getCheckState(checkMinimumRequiredPassed, checkTwoDidNotRun);
-  const checkThreeState = getCheckState(checkInfeasibilityPassed, checkThreeDidNotRun);
-
-  const getStateLabel = (state: CheckState): string => {
-    if (state === 'passed') return 'Passed';
-    if (state === 'failed') return 'Failed';
-    return 'Not run';
-  };
-
-  const getStateColor = (state: CheckState): string => {
-    if (state === 'passed') return 'success.main';
-    if (state === 'failed') return 'error.main';
-    return 'text.secondary';
-  };
-
-  const renderTableList = (tables: string[]): JSX.Element => {
-    if (tables.length === 0) {
-      return <Typography variant="body2">No tables were returned.</Typography>;
-    }
-    return (
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-        {tables.map((table) => (
-          <Button
-            key={table}
-            variant="outlined"
-            size="small"
-            color="error"
-            onClick={() => onSelectTable?.(table)}
-          >
-            {table}
-          </Button>
-        ))}
-      </Box>
-    );
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Scenario Validation</DialogTitle>
-      <DialogContent dividers>
-        {loading && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <CircularProgress size={20} />
-            <Typography variant="body2">Validating scenario...</Typography>
-          </Box>
-        )}
-        {!loading && error && (
-          <Typography variant="body2" color="error">
-            {error}
-          </Typography>
-        )}
-        {!loading && !error && result && (
-          <>
-            <Typography variant="body1" sx={{ mb: 2 }}>
-              {isValid
-                ? "Scenario looks ready to optimize."
-                : "Scenario requires more input before optimization."}
-            </Typography>
-
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2">1. Check for Missing Tables</Typography>
-              <Typography variant="subtitle2" sx={{ color: getStateColor(checkOneState) }}>
-                {getStateLabel(checkOneState)}
-              </Typography>
-            </Box>
-            {checkOneState === 'failed' && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Missing tables:
-                </Typography>
-                {renderTableList(missingTables)}
-              </Box>
-            )}
-
-            <Divider sx={{ my: 1 }} />
-
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2">2. Check for Minimum Required Tables</Typography>
-              <Typography variant="subtitle2" sx={{ color: getStateColor(checkTwoState) }}>
-                {getStateLabel(checkTwoState)}
-              </Typography>
-            </Box>
-            {checkTwoState === 'failed' && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Tables with issues:
-                </Typography>
-                {renderTableList(tablesWithIssues)}
-              </Box>
-            )}
-
-            <Divider sx={{ my: 1 }} />
-
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography variant="subtitle2">3. Check for Infeasibility</Typography>
-              <Typography variant="subtitle2" sx={{ color: getStateColor(checkThreeState) }}>
-                {getStateLabel(checkThreeState)}
-              </Typography>
-            </Box>
-          </>
-        )}
-      </DialogContent>
-      <DialogActions>
-        {!loading && !error && isValid && (
-          <Button
-            onClick={onAdvance}
-            variant="contained"
-            disabled={advancing}
-          >
-            Advance to Optimization Setup
-          </Button>
-        )}
-        <Button onClick={onClose} variant="contained">Close</Button>
-      </DialogActions>
-    </Dialog>
-  );
+export default function ScenarioValidationDialog({open, loading, advancing = false, error, result,
+  onAdvance, onCheckFeasibility, onSelectIssue, onSelectTable, onClose}: {
+  open: boolean; loading: boolean; advancing?: boolean; error?: string | null; result?: ScenarioValidation | null;
+  onAdvance?: () => void; onCheckFeasibility?: () => void; onSelectIssue?: (issue: ValidationIssue) => void;
+  onSelectTable?: (table: string) => void; onClose: () => void;
+}) {
+  const issues = result?.issues || [];
+  return <Dialog open={open} onClose={loading ? undefined : onClose} fullWidth maxWidth="md">
+    <DialogTitle>Scenario Validation</DialogTitle>
+    <DialogContent dividers>
+      {loading && <Box sx={{display: 'flex', gap: 2, alignItems: 'center'}}><CircularProgress size={20}/><Typography>Checking the saved scenario… A feasibility solve has a 20-second solver budget.</Typography></Box>}
+      {!loading && error && <Alert severity="error">{error}</Alert>}
+      {!loading && result && <>
+        <Alert severity={result.state === 'feasible' ? 'success' : result.valid ? 'info' : 'warning'}>
+          {STATES[result.state || ''] || 'Review the scenario checks below.'}
+        </Alert>
+        {result.error && <Alert severity="error" sx={{mt: 1}}>{result.error}</Alert>}
+        <Typography variant="body2" sx={{mt: 2}}>Input checks: {result.error_count || 0} issues, {result.warning_count || 0} assumptions to review. Model construction: {result.model_check || 'not run'}. Feasibility: {result.feasibility || 'not run'}.</Typography>
+        {result.state === 'infeasible' && <Typography variant="body2" sx={{mt: 1}}>Review routes, available capacities, period forecasts, storage balances, and fixed decisions. Passing total supply/capacity checks does not prove that water can travel through the network.</Typography>}
+        <ValidationIssues issues={[...issues.filter(i => i.severity === 'error'), ...issues.filter(i => i.severity === 'warning')]}
+          limit={40} onSelect={issue => onSelectIssue ? onSelectIssue(issue) : issue.table && onSelectTable?.(issue.table)}/>
+        {result.truncated && <Typography variant="body2">Additional issues remain. Resolve these and validate again.</Typography>}
+      </>}
+    </DialogContent>
+    <DialogActions>
+      {!loading && result?.valid && onCheckFeasibility && result.feasibility !== 'feasible' && <Button onClick={onCheckFeasibility} variant="outlined">Check feasibility</Button>}
+      {!loading && !error && result?.valid && result.state !== 'outdated' && <Button onClick={onAdvance} disabled={advancing} variant="contained">Advance to Optimization Setup</Button>}
+      <Button onClick={onClose} disabled={loading}>Close</Button>
+    </DialogActions>
+  </Dialog>;
 }

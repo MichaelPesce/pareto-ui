@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from pyomo.environ import ConcreteModel, Constraint, Var
 from pyomo.opt import TerminationCondition
-from app.internal.util import prepare_config, check_for_minimum_required_tables
+from app.internal.util import prepare_config
 
 
 class OptimizationWorkflowTests(unittest.TestCase):
@@ -97,22 +97,6 @@ class OptimizationWorkflowTests(unittest.TestCase):
                 self.assertEqual(handler.generate_optimization_diagnosis_with_ai(1, None)['status'], 'error')
             ai.prompt.return_value = '{"status":"error", "errorMessage":{"unexpected":"object"}}'
             self.assertIsInstance(handler.generate_optimization_diagnosis_with_ai(1, None)['errorMessage'], str)
-
-
-class OptionalReuseTests(unittest.TestCase):
-    def test_reuse_is_optional_and_zero_values_are_valid_when_used(self):
-        inputs = {'df_sets': {name: [name] for name in ['ProductionPads', 'CompletionsPads', 'StorageSites', 'SWDSites', 'ExternalWaterSources']},
-                  'df_parameters': {name: {'NODES': ['A'], 'VALUE': [1]} for name in ['InitialDisposalCapacity', 'InitialStorageCapacity', 'CompletionsPadStorage', 'DisposalOperationalCost']}}
-        inputs['df_parameters'].update({name: {'NODES': ['A'], 'T1': [1]} for name in ['PadRates', 'FlowbackRates', 'CompletionsDemand']})
-        scenario = {'data_input': inputs}
-        self.assertEqual(check_for_minimum_required_tables(scenario), [])
-        inputs['df_sets']['ReuseOptions'] = ['O1']
-        self.assertIn('ReuseMinimum', check_for_minimum_required_tables(scenario))
-        inputs['df_parameters'].update({'ReuseMinimum': {'NODES': ['O1'], 'T1': [0]},
-            'BeneficialReuseCost': {'NODES': ['O1'], 'VALUE': [0]}, 'BeneficialReuseCredit': {'NODES': ['O1'], 'VALUE': [0]}})
-        self.assertEqual(check_for_minimum_required_tables(scenario), [])
-        inputs['df_parameters']['BeneficialReuseCost']['VALUE'] = [-1]
-        self.assertIn('BeneficialReuseCost', check_for_minimum_required_tables(scenario))
 
 
 if __name__ == '__main__':

@@ -313,7 +313,7 @@ export default function Optimization(props: OptimizationProps) {
               sx={styles.filled} 
               variant="contained" 
               size="large" 
-              disabled={props.backgroundTasks.length > 0 || props.disabled} 
+              disabled={props.backgroundTasks.length > 0 || props.disabled || props.saving}
               endIcon={<ArrowForwardIcon />}> 
               Optimize 
             </Button>

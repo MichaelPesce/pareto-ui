@@ -1,7 +1,8 @@
 import './Dashboard.css';
 import {useEffect, useState, type ChangeEvent} from 'react';   
 import {  } from "react-router-dom";
-import { Grid, IconButton } from '@mui/material'
+import { Alert, Button, Grid, IconButton } from '@mui/material'
+import ScenarioCompletion from '../../components/ScenarioCompletion/ScenarioCompletion';
 import EditIcon from '@mui/icons-material/Edit';
 import ProcessToolbar from '../../components/ProcessToolbar/ProcessToolbar'
 import Bottombar from '../../components/Bottombar/Bottombar'; 
@@ -21,7 +22,7 @@ export default function Dashboard() {
     scenarios, scenarioData: scenario, navigateToScenarioList: navigateHome, handleScenarioUpdate: updateScenario, updateAppState,
     addTask, handleEditScenarioName, section, category, handleSetSection,
     handleSetCategory, appState, backgroundTasks, syncScenarioData,
-    copyAndRunOptimization, handleUpdateExcel,
+    copyAndRunOptimization, handleUpdateExcel, isSaving, saveError, inputFocus, focusInputIssue, acceptSavedScenario,
   } = useScenario();
   // console.log(scenario)
   
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [ openEditName, setOpenEditName ] = useState<boolean>(false)
   const [ inputDataEdited, setInputDataEdited ] = useState<boolean>(false)
   const [ disableOptimize, setDisableOptimize ] = useState<boolean>(false)
+  const [runError, setRunError] = useState<string | null>(null);
   const enabledStatusList = ['Optimized','Draft','failure', 'Not Optimized', 'Infeasible']
 
   const handleOpenEditName = () => setOpenEditName(true);
@@ -68,25 +70,22 @@ export default function Dashboard() {
     },
    }
 
-   const handleRunModel = () => {
-      runModel(port, {"scenario": scenario})
-      .then(r =>  r.json().then(data => ({status: r.status, body: data})))
-      .then((response) => {
-        let responseCode = response.status
-        let data = response.body
-        if(responseCode === 200) {
-          updateScenario(data)
-          updateAppState({action:'section',section:2},scenario.id)
-          addTask(scenario.id)
-        }
-        else if(responseCode === 500) {
-          console.error('error on model run: ',data.detail)
-        }
-      })
-      .catch(e => {
-        console.error('error on model run: ',e)
-      })
-   }
+   const handleRunModel = async () => {
+     setDisableOptimize(true); setRunError(null);
+     try {
+       const response = await runModel(port, {scenario});
+       const data = await response.json();
+       if (!response.ok) {
+         const detail = data.detail;
+         throw new Error(typeof detail === 'string' ? detail : detail?.validation?.error || detail?.message || 'Unable to start optimization.');
+       }
+       acceptSavedScenario(data);
+       updateAppState({action: 'section', section: 2}, scenario.id);
+       addTask(scenario.id);
+     } catch (error) {
+       setRunError(error instanceof Error ? error.message : 'Unable to start optimization.');
+     } finally { setDisableOptimize(false); }
+   };
 
   const handleEditName = (event: ChangeEvent<HTMLInputElement>) => {
    setName(event.target.value)
@@ -116,6 +115,7 @@ export default function Dashboard() {
           scenario={scenario} 
           section={section} 
           category={category} 
+          inputFocus={inputFocus}
           inputDataEdited={inputDataEdited}
           handleUpdateExcel={handleUpdateExcel}
           setInputDataEdited={setInputDataEdited}
@@ -155,7 +155,12 @@ export default function Dashboard() {
       <Grid item xs={4}>
       </Grid>
       <Grid item xs={12}>
-      {(scenario && section===0) &&
+      {runError && <Alert severity="error" action={<Button onClick={() => {handleSetSection(0); setRunError(null);}}>Review inputs</Button>}>{runError}</Alert>}
+      {saveError && <Alert severity="error" action={<Button onClick={syncScenarioData}>Reload saved inputs</Button>}>{saveError}</Alert>}
+      {isSaving && <Alert severity="info">Saving scenario…</Alert>}
+      {(scenario && section === 0 && category === 'Complete Scenario Inputs') && <ScenarioCompletion scenario={scenario}
+        disabled={inputDataEdited || isSaving || backgroundTasks.includes(scenario.id)} onSelect={focusInputIssue} />}
+      {(scenario && section===0 && category !== 'Complete Scenario Inputs') &&
         <DataInput 
           handleUpdateExcel={handleUpdateExcel} 
           category={category} 
@@ -175,6 +180,7 @@ export default function Dashboard() {
           handleRunModel={handleRunModel}
           backgroundTasks={backgroundTasks} 
           disabled={disableOptimize}
+          saving={isSaving}
           setDisabled={setDisableOptimize}
         />
       }
@@ -192,7 +198,9 @@ export default function Dashboard() {
       }
       </Grid>
     </Grid>
-    <Bottombar 
+    <Bottombar
+      saving={isSaving}
+      focusInputIssue={focusInputIssue}
       handleSelection={handleSetSection} 
       handleSetCategory={handleSetCategory}
       section={section} 

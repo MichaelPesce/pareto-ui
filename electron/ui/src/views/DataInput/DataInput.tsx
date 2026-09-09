@@ -10,8 +10,11 @@ import ErrorBar from '../../components/ErrorBar/ErrorBar'
 import InputSummary from '../../components/InputSummary/InputSummary'
 import NetworkDiagram from '../../components/NetworkDiagram/NetworkDiagram';
 import DataTable from '../../components/DataTable/DataTable';
+import {useScenario} from '../../context/ScenarioContext';
+import ForecastFill from '../../components/ScenarioCompletion/ForecastFill';
 
 export default function DataInput(props: DataInputProps) {
+  const {inputFocus, isSaving} = useScenario();
   const { 
     updateScenario,
     category,
@@ -116,10 +119,11 @@ export default function DataInput(props: DataInputProps) {
    setPlotCategory(event.target.value as string)
   }
 
-  const handleSaveChanges = () => {
+  const handleSaveChanges = async () => {
     //api call to save changes on backend
+    const saved = await handleUpdateExcel(scenario.id, category, scenario.data_input.df_parameters[category]);
+    if (saved === false) return;
     handleEditInput(false)
-    handleUpdateExcel(scenario.id, category, scenario.data_input.df_parameters[category])
     let tempEditDict = {}
     Object.entries(scenario.data_input.df_parameters[category]).map( ([key, value], ind) => {
       scenario.data_input.df_parameters[category][key].map( (value, index) => {
@@ -326,6 +330,10 @@ const handleRowFilter = (row) => {
       else {
         return (
           <Box style={{backgroundColor:'white'}} sx={{m:3, padding:2, boxShadow:3}}>
+        {['PadRates', 'CompletionsDemand', 'FlowbackRates', 'ExtWaterSourcingAvailability', 'ReuseMinimum', 'ReuseCapacity', 'DisposalOperatingCapacity'].includes(category) &&
+          <ForecastFill key={`${category}-${scenario.input_revision}`} name={category} table={scenario.data_input.df_parameters[category]}
+            periods={scenario.data_input.df_sets.TimePeriods || []} unit={category === 'DisposalOperatingCapacity' ? 'fraction, 0–1' : scenario.data_input.display_units[category] || 'bbl/day'}
+            disabled={edited || isSaving} onSave={async table => (await handleUpdateExcel(scenario.id, category, table)) !== false} />}
         <Grid container>
           <Grid item xs={0.5}>
             <Box sx={{display: 'flex', justifyContent: 'flex-start', marginLeft:'10px'}}>
@@ -335,6 +343,7 @@ const handleRowFilter = (row) => {
           <Grid item xs={11}>
             <DataTable
               key={category}
+              validationFocus={inputFocus}
               section="input"
               editDict={editDict}
               setEditDict={setEditDict}
@@ -389,5 +398,4 @@ const handleRowFilter = (row) => {
   );
 
 }
-
 

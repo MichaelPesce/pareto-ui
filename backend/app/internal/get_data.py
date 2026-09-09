@@ -53,6 +53,7 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     """
     frontend_parameters = {}
     pareto_input_set_tab_names = get_valid_input_set_tab_names(_model_type)
+    pareto_input_set_tab_names = [*pareto_input_set_tab_names, 'TimePeriods']
     pareto_input_parameter_tab_names = get_valid_input_parameter_tab_names(_model_type)
 
     if _set_list is not None:
@@ -324,7 +325,7 @@ def get_data(
     # The set for time periods is defined based on the columns of the parameter for
     # Completions Demand. This is done so the user does not have to add an extra tab
     # in the spreadsheet for the time period set
-    if "CompletionsDemand" in _df_parameters.keys():
+    if "TimePeriods" not in _df_sets and "CompletionsDemand" in _df_parameters.keys():
         _df_sets["TimePeriods"] = _df_parameters[
             "CompletionsDemand"
         ].columns.to_series()
@@ -335,6 +336,10 @@ def get_data(
     # The model requires an empty parameter dictionary, not nested empty values.
     for name in empty_tables:
         _df_parameters[name] = {}
+    from pareto.utilities.process_data import get_valid_piping_arc_list, get_valid_trucking_arc_list
+    for name in get_valid_piping_arc_list() + get_valid_trucking_arc_list():
+        if name in _df_parameters:
+            _df_parameters[name] = {key: value for key, value in _df_parameters[name].items() if value not in (0, '0', False)}
     return [_df_sets, _df_parameters, frontend_parameters]
 
 

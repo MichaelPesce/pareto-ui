@@ -215,6 +215,9 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
             }
         }
 
+        if (showNetworkNode && !creatingNewNode && selectedNode?.node.name !== updatedNode.name) {
+            updatedScenario.data_input.map_data._node_renames = {[selectedNode.node.name]: updatedNode.name};
+        }
         handleUpdateScenario(updatedScenario, false, "map")
         deselectActiveNode();
     }

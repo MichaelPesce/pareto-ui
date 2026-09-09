@@ -1,5 +1,8 @@
 # Network map editing and diagnostics
 
+For planning periods, forecast entry, and validation through a completed run, see
+[From map file to optimization](scenario-completion.md).
+
 Map imports support KML/KMZ and zipped shapefiles. Duplicate feature names are
 retained with unique suffixes. Repeated line vertices near the same node do not
 create self-connections; imported bends and measured segment lengths are retained.
@@ -41,7 +44,7 @@ Missing or blank keys, a pending check, and failed checks keep
 AI diagnosis, saved AI guidance, and AI input filling hidden. Ordinary optimization
 errors and constraint details remain available. The check sends no request to the
 AI service and never returns the key to the frontend. Users can configure AI from
-the main header's Settings button; see [AI settings](ai-settings.md).
+the main header's hamburger menu → Settings; see [AI settings](ai-settings.md).
 
 ## Regression checks
 

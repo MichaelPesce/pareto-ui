@@ -3,6 +3,8 @@ import os
 from functools import lru_cache
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from .input_schema import FORECASTS, OPTION_SETS
+from .workbook_preservation import WorkbookPreservation
 
 import logging
 _log = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ def DeriveTemplateHeaderValues(template_location=DEFAULT_TEMPLATE_LOCATION):
         wb.close()
     return header_values
 
-def WriteMapDataToExcel(data, output_file_name, template_location = None):
+def WriteMapDataToExcel(data, output_file_name, template_location=None, previous_map_data=None):
     """
     Write map_data to excel
     Accepts: map_data, output file name, template location (optional)
@@ -99,6 +101,13 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
     ## step 2: open excel workbook
     wb = load_workbook(excel_path, data_only=True)
     template_header_values = DeriveTemplateHeaderValues(DEFAULT_TEMPLATE_LOCATION)
+    preservation = WorkbookPreservation(wb, data, previous_map_data)
+    for set_name, choices in defaults.items():
+        original = [row[0] for row in wb[set_name].iter_rows(min_row=2, values_only=True) if row[0] not in (None, '')]
+        if original:
+            retained = {key: choices.get(key, {}) for key in original}
+            choices.clear()
+            choices.update(retained)
 
     def _clear_cells(ws, row_start, row_end, col_start, col_end):
         if row_start > row_end or col_start > col_end:
@@ -132,6 +141,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
         return column
 
     def _sync_template_headers(ws, has_data):
+        preservation.reset(ws)
         _clear_cells(ws, 2, 2, 1, ws.max_column)
         if has_data:
             for column, value in template_header_values.get(ws.title, {}).items():
@@ -481,8 +491,8 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
             ["NetworkNodes", "SWDSites", "TreatmentSites", "StorageSites", "ReuseOptions", "CompletionsPads"],
         ],
         "TruckingTime": [
-            ["ProductionPads", "CompletionsPads"], 
-            ["SWDSites"],
+            ["ProductionPads", "CompletionsPads", "StorageSites", "TreatmentSites", "ExternalWaterSources"],
+            ["CompletionsPads", "SWDSites", "StorageSites", "TreatmentSites", "ReuseOptions"],
         ],
     }
     
@@ -631,7 +641,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
         "ReuseOperationalCost": ["CompletionsPads"],
         "ExternalSourcingCost": ["ExternalWaterSources"],
         "ExternalWaterQuality": ["ExternalWaterSources"],
-        "TruckingHourlyCost": ["ProductionPads", "CompletionsPads", "ExternalWaterSources"],
+        "TruckingHourlyCost": ["ProductionPads", "CompletionsPads", "ExternalWaterSources", "StorageSites", "TreatmentSites"],
         "DesalinationSites": ["TreatmentSites"],
         "BeneficialReuseCost": ["ReuseOptions"],
         "BeneficialReuseCredit": ["ReuseOptions"],
@@ -723,7 +733,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
                 keyCellLocation = f'{get_column_letter(1)}{row}'
                 valueCellLocation = f'{get_column_letter(2)}{row}'
                 ws[keyCellLocation] = each
-                ws[valueCellLocation] = default_values[each][capacity_increments_tab]
+                ws[valueCellLocation] = default_values[each].get(capacity_increments_tab)
                 row+=1
             _clear_antiquated_rows(ws, row, [1], max_row=200, clear_from_col=1, clear_to_col=2, label=capacity_increments_tab)
         except Exception as e:
@@ -751,7 +761,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
                 ws[headerCellLocation] = each
 
                 valueCellLocation = f'{get_column_letter(column)}{row}'
-                ws[valueCellLocation] = default_values[each][capacity_increments_tab]
+                ws[valueCellLocation] = default_values[each].get(capacity_increments_tab)
                 column+=1
             row+=1
         _clear_antiquated_rows(ws, row, [1], max_row=200, clear_from_col=1, clear_to_col=column - 1, label=capacity_increments_tab)
@@ -857,7 +867,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
         _sync_template_headers(ws, has_data=has_data)
         row = 3
         for technology in treatment_technologies:
-            value = treatment_technologies[technology][tab]
+            value = treatment_technologies[technology].get(tab)
             _print(f'tab {tab}: adding {technology}')
             for node in data.get(node_key, {}):
                 treatmentCellLocation = f'{get_column_letter(column-1)}{row}'
@@ -879,9 +889,9 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
             tab, treatment_rows, list(treatment_capacities),
             ["TreatmentSites", "TreatmentTechnologies"],
             lambda keys, capacity: (
-                treatment_capacities[capacity][tab]
+                treatment_capacities[capacity].get(tab)
                 if tab == "TreatmentExpansionLeadTime"
-                else treatment_technologies[keys[1]][tab]
+                else treatment_technologies[keys[1]].get(tab)
             ),
         )
 
@@ -926,6 +936,7 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
         _clear_antiquated_rows(ws, row, [1], max_row=500, clear_from_col=1, clear_to_col=2, label=disposal_tab)
 
     ## final step: Save and close
+    preservation.restore()
     wb.save(excel_path)
     wb.close()
     return True
@@ -1149,6 +1160,8 @@ def PreprocessMapData(data_input):
         'ReuseOptions': {},
         'connections': {}
     }
+    if 'TimePeriods' in data_input.get('df_sets', {}):
+        excel_data['time_periods'] = data_input['df_sets']['TimePeriods']
 
     node_types = {
         'ProductionPad': 'ProductionPads',

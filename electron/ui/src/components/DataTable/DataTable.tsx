@@ -56,6 +56,9 @@ export default function DataTable(props: DataTableProps): JSX.Element {
   const [rowValue, setRowValue] = useState<number | string>(0);
   const [doubleClickIndex, setDoubleClickIndex] = useState<number | null>(null);
   const [showRowValueInput, setShowRowValueInput] = useState<boolean>(false);
+  useEffect(() => {
+    document.querySelector('[data-validation-focus="true"]')?.scrollIntoView?.({block: 'nearest', inline: 'center'});
+  }, [props.validationFocus, category]);
 
   useEffect(() => {
     if (scenario.override_values === undefined && OVERRIDE_CATEGORIES) {
@@ -210,6 +213,10 @@ export default function DataTable(props: DataTableProps): JSX.Element {
               arrow
             >
               <TableCell
+                data-validation-focus={props.validationFocus?.table === category && props.validationFocus?.row?.length > 0 &&
+                  props.validationFocus.row.every((name: string, position: number) => data[category][Object.keys(data[category])[position]]?.[ind] === name) &&
+                  (!props.validationFocus.period || Object.keys(data[category])[index] === props.validationFocus.period) ? 'true' : undefined}
+                sx={{'&[data-validation-focus="true"]': {outline: '2px solid #ed9c28', outlineOffset: '-2px', backgroundColor: '#fff8e8 !important'}}}
                 onKeyDown={handleKeyDown}
                 onDoubleClick={() => handleDoubleClick(ind, index)}
                 key={`${ind}:${index}`}

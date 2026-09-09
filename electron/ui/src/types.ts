@@ -237,6 +237,17 @@ export interface ScenarioResults {
 }
 
 export interface ScenarioValidation {
+  revision?: string;
+  state?: string;
+  issues?: ValidationIssue[];
+  error_count?: number;
+  warning_count?: number;
+  truncated?: boolean;
+  model_check?: string;
+  feasibility?: string;
+  sections?: Array<{id: string; title: string; error_count: number; warning_count: number}>;
+  units?: Record<string, string>;
+  periods?: string[];
   valid?: boolean | null;
   missing_tables?: string[];
   tables_with_issues?: string[];
@@ -244,6 +255,17 @@ export interface ScenarioValidation {
   check_for_minimum_required_tables?: boolean | null;
   check_for_infeasibility?: boolean | null;
   error?: string | null;
+}
+
+export interface ValidationIssue {
+  code: string;
+  section: string;
+  severity: 'error' | 'warning';
+  message: string;
+  table?: string | null;
+  row?: string[];
+  period?: string | null;
+  area?: string;
 }
 
 export interface OverrideEntry {
@@ -445,6 +467,7 @@ export interface KPIDashboardProps {
 }
 
 export interface OptimizationProps {
+  saving?: boolean;
   scenario: Scenario;
   updateScenario: (updatedScenario: any, setScenarioData?: boolean, propagateChanges?: string) => void;
   disabled: boolean;
@@ -498,7 +521,7 @@ export interface DataInputProps {
   category: string;
   handleSetCategory: (category: string) => void;
   syncScenarioData: (id?: string | number) => void;
-  handleUpdateExcel: (id: string | number, tableKey: string, updatedTable: any) => void;
+  handleUpdateExcel: (id: string | number, tableKey: string, updatedTable: any) => void | Promise<boolean>;
   handleEditInput: (edited: boolean) => void;
   edited: boolean;
 }
@@ -601,12 +624,13 @@ export interface SubHeaderProps {
 }
 
 export interface SidebarProps {
+  inputFocus?: ValidationIssue | null;
   handleSetCategory?: (category: string) => void;
   scenario?: Scenario | any;
   section?: number;
   category?: string | null;
   inputDataEdited?: boolean;
-  handleUpdateExcel?: (id: string | number, tableKey: string, updatedTable: any) => void;
+  handleUpdateExcel?: (id: string | number, tableKey: string, updatedTable: any) => void | Promise<boolean>;
   setInputDataEdited?: (b: boolean) => void;
   syncScenarioData?: (id?: string | number) => void;
   [key: string]: any;

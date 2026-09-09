@@ -5,6 +5,7 @@ PARETO UI is the desktop user interface for the [Project PARETO](https://github.
 ## Documentation
 
 - [Building and running PARETO UI](docs/building.md)
+- [From map file to optimization — user guide](docs/scenario-completion.md)
 - [Network map editing and diagnostics](docs/network-map.md)
 - [Windows code signing with Google Cloud KMS](docs/windows-code-signing-google-cloud-kms.md)
 - [PARETO model documentation](https://pareto.readthedocs.io/en/stable/)

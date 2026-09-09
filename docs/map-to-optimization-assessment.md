@@ -1,5 +1,10 @@
 **Map-to-optimization assessment — 9 September 2026**
 
+Implementation update: the basic map-to-cost-optimization path and completion UI
+are now covered by acceptance tests. See [the workflow guide](scenario-completion.md)
+for implemented behavior and remaining advanced-mode limitations. The findings below
+record the original research.
+
 The map workflow can reach a real, feasible optimization with substantially less data than the toy workbook contains. I verified this with the installed parent model and CBC, including a temporary workbook generated from `map_testing/map_testing.kml`. The next work should protect data during map/table synchronization, establish a reliable planning horizon, and replace the fixed table checklist with requirements derived from the selected facilities and optimization settings.
 
 This is an assessment and implementation proposal. No optimization, validation, map, or parent-model implementation was changed for this investigation. The separately requested header hamburger menu was implemented.
@@ -57,6 +62,8 @@ The spreadsheet reader also supplies an internal `proprietary_data` flag. This i
 For the actual KML demonstration, the path PP01 → N01 → K01 carried 100 bbl/day for 52 weeks. K01 had capacity 100 bbl/day and cost 1 USD/bbl; network nodes had capacity 1,000 bbl/day. D4 was assigned to the map paths using the existing 4-inch/14,286 bbl/day lookup; active pipes used 0.01 USD/bbl. The template's existing expansion and economic defaults were retained. The planning headers and PP01 forecast were supplied in the temporary workbook. CBC returned a feasible optimum of 37.128 kUSD, consistent with 36,400 bbl × 1.02 USD/bbl.
 
 The app currently rejects this otherwise working small case because its checklist insists on completions pads, storage, external water, and their tables. That is an application restriction, not a demonstrated physical requirement. See [current minimum-table checklist](/Users/michaelpesce/Desktop/pareto-ui/backend/app/internal/util.py:686).
+
+<a id="how-requirements-grow"></a>
 
 **How the requirements grow.** User guidance should follow the facilities and modes actually present. The entries below include inputs that need a deliberate value or a reviewed default for a useful result; they are not all hard errors in the parent library.
 

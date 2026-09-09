@@ -12,6 +12,9 @@
 #####################################################################################################
 import io
 import os
+import tempfile
+import shutil
+from pathlib import Path
 import aiofiles
 from fastapi import Body, Request, APIRouter, HTTPException, File, UploadFile, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -27,6 +30,10 @@ from app.internal.KMZParser import ParseKMZ
 from app.internal.ExcelApi import WriteMapDataToExcel, PreprocessMapData
 from app.internal.ShapefileParser import extract_shp_paths, parseShapefiles
 from app.internal.util import time_it
+from app.internal.util import prepare_config
+from app.internal.input_schema import input_revision
+from app.internal.scenario_inputs import write_inputs
+from app.internal.scenario_validation import validate_inputs
 from app.internal.ai_configuration import ai_configuration as cborg
 
 # _log = idaeslog.getLogger(__name__)
@@ -72,19 +79,47 @@ async def get_scenario(scenario_id: str):
     return scenario_handler.retrieve_scenario(scenario_id)
 
 @router.get("/validate_scenario/{scenario_id}")
-async def validate_scenario(scenario_id: int):
+def validate_scenario(scenario_id: int):
     """
     Validate whether a scenario is ready to be optimized.
     """
     return scenario_handler.validate__pareto_scenario(scenario_id)
 
+@router.get('/scenario_readiness/{scenario_id}')
+def scenario_readiness(scenario_id: int):
+    return validate_inputs(scenario_handler.get_scenario(scenario_id))
+
+@router.post('/scenario_feasibility/{scenario_id}')
+def scenario_feasibility(scenario_id: int):
+    scenario_handler.ensure_editable(scenario_id)
+    return scenario_handler.validate__pareto_scenario(scenario_id, solve=True)
+
+@router.post('/planning_horizon/{scenario_id}')
+def planning_horizon(scenario_id: int, payload: dict = Body(...)):
+    with scenario_handler._db_lock:
+        try:
+            current = scenario_handler.get_scenario(scenario_id)
+            if payload.get('revision') and payload['revision'] != current['input_revision']:
+                raise HTTPException(409, detail='Inputs changed. Refresh before changing the planning horizon.')
+            return scenario_handler.update_horizon(scenario_id, payload.get('periods'))
+        except ValueError as error:
+            raise HTTPException(400, detail=str(error)) from error
+
+
 @router.post("/advance_to_optimization_setup/{scenario_id}")
 async def advance_to_optimization_setup(scenario_id: int):
     """
-    Mark a scenario as Incomplete so optimization setup can proceed.
+    Mark a validated scenario as Draft so optimization setup can proceed.
     """
-    updated_scenario = scenario_handler.set_scenario_status(scenario_id, "Draft")
-    return {"data": updated_scenario}
+    with scenario_handler._db_lock:
+        scenario_handler.ensure_editable(scenario_id)
+        current = scenario_handler.get_scenario(scenario_id)
+        validation = current.get('validation', {})
+        if not validation.get('valid') or validation.get('revision') != current['input_revision']:
+            raise HTTPException(409, detail='Validate the current inputs before advancing to optimization setup.')
+        updated_scenario = scenario_handler.set_scenario_status(scenario_id, "Draft")
+        return {"data": updated_scenario}
+
 
 @router.post("/update")
 async def update(request: Request):
@@ -97,23 +132,30 @@ async def update(request: Request):
         Updated scenario
     """
     data = await request.json()
-    updated_scenario = data['updatedScenario']
-    propagate_changes = data.get("propagateChanges")
-    scenario_handler.update_scenario(updated_scenario)
-    scenario_id = updated_scenario.get("id")
-    if scenario_id:
-        if propagate_changes == "map":
-            _log.info(f"propagating map changes")
-            scenario_handler.propagate_map_data(updated_scenario)
-            scenario = scenario_handler.get_scenario(scenario_id)
-            return {"data": scenario}
-        elif propagate_changes == "json":
-            _log.info(f"propagating JSON changes")
-            scenario_handler.propagate_json_data(updated_scenario)
-            scenario = scenario_handler.get_scenario(scenario_id)
-            return {"data": scenario}
+    with scenario_handler._db_lock:
+        updated_scenario = data['updatedScenario']
+        propagate_changes = data.get("propagateChanges")
+        scenario_id = updated_scenario.get("id")
+        if scenario_id:
+            scenario_handler.ensure_editable(scenario_id)
+            current = scenario_handler.get_scenario(int(scenario_id))
+            if updated_scenario.get('input_revision') and updated_scenario['input_revision'] != current['input_revision']:
+                raise HTTPException(409, detail='Inputs changed in another request. Refresh the scenario before saving again.')
+            updated_scenario['data_input'].setdefault('units', current['data_input']['units'])
+            if propagate_changes == "map":
+                _log.info(f"propagating map changes")
+                scenario_handler.propagate_map_data(updated_scenario)
+                scenario = scenario_handler.get_scenario(scenario_id)
+                return {"data": scenario}
+            elif propagate_changes == "json":
+                _log.info(f"propagating JSON changes")
+                scenario_handler.propagate_json_data(updated_scenario)
+                scenario = scenario_handler.get_scenario(scenario_id)
+                return {"data": scenario}
+            if updated_scenario['data_input'] != current['data_input']:
+                return {'data': scenario_handler.save_inputs(updated_scenario)}
+        return {"data": scenario_handler.update_scenario(updated_scenario)}
 
-    return {"data": updated_scenario}
 
 @router.post("/upload/{scenario_name}")
 async def upload(scenario_name: str, defaultNodeType: str, file: UploadFile = File(...)):
@@ -186,6 +228,7 @@ async def upload_additional_map(scenario_id: int, defaultNodeType: str = "Networ
     file_extension = file.filename.split('.')[-1].lower()
     scenario = scenario_handler.get_scenario(scenario_id)
     excel_path = scenario_handler.get_excelsheet_path(scenario_id)
+    scenario_handler.ensure_editable(scenario_id)
     initial_map_data = scenario.get("data_input", {}).get("map_data", None)
 
     # check if file is excel or KMZ
@@ -197,8 +240,8 @@ async def upload_additional_map(scenario_id: int, defaultNodeType: str = "Networ
                 content = await file.read()
                 await out_file.write(content) 
             map_data = ParseKMZ(kmz_path, defaultNodeType, initial_map_data=initial_map_data)
-            WriteMapDataToExcel(map_data, excel_path)
-            return scenario_handler.update_scenario_from_excel(scenario=scenario, excel_path=excel_path, map_data=map_data)
+            scenario['data_input']['map_data'] = map_data
+            return scenario_handler.propagate_map_data(scenario)
         except Exception as e:
             _log.error(f"error on file upload: {str(e)}")
             raise HTTPException(400, detail=f"File upload failed: {e}")
@@ -212,8 +255,8 @@ async def upload_additional_map(scenario_id: int, defaultNodeType: str = "Networ
             shp_paths = extract_shp_paths(zip_path)
             map_data = parseShapefiles(shp_paths, defaultNodeType, initial_map_data)
             map_data = PreprocessMapData({"map_data": map_data})
-            WriteMapDataToExcel(map_data, excel_path)
-            return scenario_handler.update_scenario_from_excel(scenario=scenario, excel_path=excel_path, map_data=map_data)
+            scenario['data_input']['map_data'] = map_data
+            return scenario_handler.propagate_map_data(scenario)
         except Exception as e:
             _log.exception(f"Error on file upload")
             raise HTTPException(400, detail=f"File upload failed: {e}")
@@ -232,16 +275,17 @@ async def replace_excel(scenario_id: int, file: UploadFile = File(...)):
         New scenario data
     """
         
-    output_path = f"{scenario_handler.excelsheets_path}/{scenario_id}.xlsx"
-    try: # get file contents
-        async with aiofiles.open(output_path, 'wb') as out_file:
-            content = await file.read()
-            await out_file.write(content) 
-        return scenario_handler.replace_excelsheet(output_path=output_path, id=scenario_id)
-
-    except Exception as e:
-        _log.error(f"error on file upload: {str(e)}")
-        raise HTTPException(400, detail=f"File upload failed: {e}")
+    scenario_handler.ensure_editable(scenario_id)
+    try:
+        with tempfile.TemporaryDirectory(dir=scenario_handler.excelsheets_path) as directory:
+            output_path = str(Path(directory) / 'replacement.xlsx')
+            async with aiofiles.open(output_path, 'wb') as out_file:
+                await out_file.write(await file.read())
+            return scenario_handler.replace_excelsheet(output_path=output_path, id=scenario_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(400, detail=f'File upload failed: {error}') from error
 
 @router.post("/delete_scenario")
 async def delete_scenario(request: Request):
@@ -261,75 +305,43 @@ async def delete_scenario(request: Request):
     
 @router.post("/run_model")
 async def run_model(request: Request, background_tasks: BackgroundTasks):
-    """Runs strategic model for given scenario.
-        The optimization of the model is added as a background task
-        and run asynchronously.
-
-    Args:
-        request.json()['scenario']: scenario to be optimized
-
-    Returns:
-        Given scenario with updated status
-    """
     data = await request.json()
-    _log.info(f"running model on : \n{data['scenario']['id']}")
-    try:
-        excel_path = "{}/{}.xlsx".format(scenario_handler.excelsheets_path,data['scenario']['id'])
-        output_path = "{}/{}.xlsx".format(scenario_handler.outputs_path,data['scenario']['id'])
-        optimizationSettings = data['scenario']['optimization']
-        modelParameters = {
-            "objective": optimizationSettings.get('objective',"cost"),
-            "runtime": optimizationSettings.get('runtime',900),
-            "pipeline_cost": optimizationSettings.get("pipeline_cost", "distance_based"),
-            "pipeline_capacity": optimizationSettings.get("pipeline_capacity", "input"),
-            "node_capacity": optimizationSettings.get("node_capacity", True),
-            "water_quality": optimizationSettings.get("waterQuality", "false"),
-            "solver": optimizationSettings.get('solver',None),
-            "build_units": optimizationSettings.get('build_units',"user_units"),
-            "optimalityGap": optimizationSettings.get("optimalityGap", 5),
-            "scale_model": optimizationSettings.get("scale_model", True),
-            "hydraulics": optimizationSettings.get('hydraulics',"false"),
-            "removal_efficiency_method": optimizationSettings.get('removal_efficiency_method',"concentration_based"),
-            "desalination_model": optimizationSettings.get("desalination_model", "false"),
-            "infrastructure_timing": optimizationSettings.get("infrastructure_timing", "false"),
-            "subsurface_risk": optimizationSettings.get("subsurface_risk", "false"),
-            "deactivate_slacks": optimizationSettings.get("deactivate_slacks", True),
-        }
-
-        _log.info(f"modelParameters: {modelParameters}")
-
-        
+    with scenario_handler._db_lock:
+        supplied = data['scenario']
+        scenario_id = int(supplied['id'])
+        scenario_handler.ensure_editable(scenario_id)
+        scenario = scenario_handler.get_scenario(scenario_id)
+        if supplied.get('input_revision') and supplied['input_revision'] != scenario['input_revision']:
+            raise HTTPException(409, detail='Inputs changed. Refresh the scenario before running optimization.')
+        # Settings may have just been changed on the setup screen. Persist them with
+        # the authoritative saved tables before validation and snapshot creation.
+        scenario['optimization'] = supplied.get('optimization', scenario['optimization'])
+        scenario['override_values'] = supplied.get('override_values', scenario.get('override_values', {}))
+        scenario = scenario_handler.update_scenario(scenario)
+        validation = scenario_handler.validate__pareto_scenario(scenario_id)
+        if not validation.get('valid'):
+            raise HTTPException(422, detail={'message': 'Review the scenario inputs before optimization.', 'validation': validation})
+        model_parameters = prepare_config(scenario, 'modelParameters')
+        directory = tempfile.mkdtemp(prefix='optimization-', dir=scenario_handler.excelsheets_path)
+        snapshot = str(Path(directory) / 'inputs.xlsx')
         try:
-            overrideValues = data['scenario']['override_values']
-        except:
-            _log.error(f'unable to find override values')
-            overrideValues = {}
+            write_inputs(scenario['data_input'], snapshot)
+            scenario_handler.add_background_task(scenario_id)
+            if scenario.get('aiDiagnosis'):
+                scenario['previousAIDiagnosis'] = scenario_handler._mark_diagnosis_outdated(scenario['aiDiagnosis'])
+                scenario.pop('aiDiagnosis', None)
+            scenario['results'] = {'data': {}, 'status': 'Initializing', 'input_revision': input_revision(scenario)}
+            scenario = scenario_handler.update_scenario(scenario)
+            background_tasks.add_task(handle_run_strategic_model, input_file=snapshot,
+                output_file=scenario_handler.get_excel_output_path(scenario_id), id=scenario_id,
+                modelParameters=model_parameters, overrideValues=scenario.get('override_values', {}))
+            background_tasks.add_task(shutil.rmtree, directory, ignore_errors=True)
+            return scenario
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            scenario_handler.remove_background_task(scenario_id)
+            raise
 
-        background_tasks.add_task(
-            handle_run_strategic_model, 
-            input_file=excel_path,
-            output_file=output_path,
-            id=data['scenario']['id'],
-            modelParameters=modelParameters,
-            overrideValues=overrideValues
-        )
-        
-        # add id to scenario handler task list to keep track of running tasks
-        scenario_handler.add_background_task(data['scenario']['id'])
-        scenario = data['scenario']
-        if scenario.get("aiDiagnosis"):
-            outdated_diagnosis = scenario_handler._mark_diagnosis_outdated(scenario.get("aiDiagnosis"))
-            scenario["previousAIDiagnosis"] = outdated_diagnosis
-            scenario.pop("aiDiagnosis", None)
-        results = {"data": {}, "status": "Initializing"}
-        scenario["results"] = results
-        scenario_handler.update_scenario(scenario)
-    except Exception as e:
-        _log.error(f"unable to find and run given excel sheet id{data['scenario']['id']}: {e}")
-        raise HTTPException(
-            500, f"unable to find and run given excel sheet id: {data['scenario']['id']}: {e}"
-        )
-    return scenario
 
 @router.get("/check_tasks")
 async def check_tasks():
@@ -366,15 +378,21 @@ async def update_excel(request: Request):
         Given scenario with updated status
     """
     data = await request.json()
-    try:
-        return scenario_handler.update_excel(data['id'], data['tableKey'], data['updatedTable'])
-        
-    except Exception as e:
-        _log.error(f"unable to find and run given excel sheet id{data['id']}: {e}")
-        raise HTTPException(
-            500, f"unable to find and run given excel sheet id: {data['id']}: {e}"
-        )
-    
+    with scenario_handler._db_lock:
+        try:
+            current = scenario_handler.get_scenario(int(data['id']))
+            if data.get('revision') and data['revision'] != current['input_revision']:
+                raise HTTPException(409, detail='Inputs changed. Reload the saved scenario before saving this table.')
+            return scenario_handler.update_excel(data['id'], data['tableKey'], data['updatedTable'])
+        except HTTPException:
+            raise
+        except Exception as e:
+            _log.error(f"unable to find and run given excel sheet id{data['id']}: {e}")
+            raise HTTPException(
+                500, f"unable to find and run given excel sheet id: {data['id']}: {e}"
+            )
+
+
 @router.get("/get_diagram/{diagram_type}/{id}")
 async def get_diagram(diagram_type: str, id: int):
     """Fetch network diagram
@@ -469,7 +487,6 @@ async def generate_excel_from_map(id: int):
     """
     scenario = scenario_handler.get_scenario(id)
     excel_path = scenario_handler.get_excelsheet_path(id)
-    scenario_handler.propagate_map_data(scenario=scenario)
     return FileResponse(excel_path)
 
 

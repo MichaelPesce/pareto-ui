@@ -131,6 +131,16 @@ export const generateExcelFromMap = (backend_port: number, id: number | string) 
     });
 }
 
+export const getScenarioReadiness = (port: number, id: number | string, signal?: AbortSignal) =>
+    fetch(`${BACKEND_URL}:${port}/scenario_readiness/${id}`, {signal});
+
+export const checkScenarioFeasibility = (port: number, id: number | string) =>
+    fetch(`${BACKEND_URL}:${port}/scenario_feasibility/${id}`, {method: 'POST'});
+
+export const savePlanningHorizon = (port: number, id: number | string, periods: string[], revision?: string) =>
+    fetch(`${BACKEND_URL}:${port}/planning_horizon/${id}`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({periods, revision})});
+
 export const getAIAvailability = (backend_port: number, signal?: AbortSignal) =>
     fetch(`${BACKEND_URL}:${backend_port}/ai_available`, { signal });
 

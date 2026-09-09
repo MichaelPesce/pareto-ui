@@ -1,6 +1,6 @@
 // src/ScenarioContext.tsx
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { AppState, Scenario, ScenarioMap } from "../types";
+import type { AppState, Scenario, ScenarioMap, ValidationIssue } from "../types";
 import {
   updateScenario,
   updateExcel,
@@ -28,6 +28,11 @@ export interface ScenarioContextValue {
   showCompletedOptimization: boolean;
   lastCompletedScenario: string | number | null;
   compareScenarioIndexes: Array<string | number>;
+  isSaving: boolean;
+  saveError: string | null;
+  acceptSavedScenario: (scenario: Scenario) => void;
+  inputFocus: ValidationIssue | null;
+  focusInputIssue: (issue: ValidationIssue) => void;
 
   // setters
   setScenarios: React.Dispatch<React.SetStateAction<ScenarioMap>>;
@@ -38,12 +43,12 @@ export interface ScenarioContextValue {
   navigateToScenarioList: () => void;
   handleScenarioSelection: (scenario: string | number) => void;
   handleNewScenario: (data: Scenario) => void;
-  handleScenarioUpdate: (updatedScenario: any, keepOptimized?: boolean, propagateChanges?: string) => void;
+  handleScenarioUpdate: (updatedScenario: any, keepOptimized?: boolean, propagateChanges?: string) => Promise<boolean>;
   handleSetSection: (section: number) => void;
   handleSetCategory: (category: string) => void;
   handleEditScenarioName: (newName: string, id: string | number, updateScenarioData?: boolean) => void;
   handleDeleteScenario: (index: string | number) => void;
-  handleUpdateExcel: (id: string | number, tableKey: string, updatedTable: any) => void;
+  handleUpdateExcel: (id: string | number, tableKey: string, updatedTable: any) => Promise<boolean>;
   syncScenarioData: () => void;
   addTask: (id: string | number) => void;
   updateAppState: (action: any, index?: string | number) => void;
@@ -69,6 +74,44 @@ interface ScenarioProviderProps {
 
 export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, navigate }) => {
   const { port } = useApp();
+  const [pendingSaves, setPendingSaves] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const revisions = useRef<Record<string, string>>({});
+  const [inputFocus, setInputFocus] = useState<ValidationIssue | null>(null);
+  const focusInputIssue = (issue: ValidationIssue) => {
+    const target = issue.area === 'map' ? 'Network Diagram' : issue.table === 'TimePeriods' ? 'Complete Scenario Inputs' : issue.table || 'Complete Scenario Inputs';
+    setInputFocus({...issue});
+    if (issue.section === 'settings' && !issue.table) {
+      handleSetSection(1);
+      return;
+    }
+    setSection(0);
+    setCategory(target);
+    setAppState(previous => ({...previous, section: 0, category: {...previous?.category, 0: target}} as AppState));
+  };
+  const acceptSavedScenario = (saved: Scenario) => {
+    revisions.current[String(saved.id)] = saved.input_revision;
+    setScenarios(previous => ({...previous, [saved.id]: saved}));
+    setScenarioData(previous => String(previous?.id) === String(saved.id) ? saved : previous);
+    setSaveError(null);
+  };
+  const enqueueSave = (work: () => Promise<void>): Promise<boolean> => {
+    setPendingSaves(count => count + 1);
+    const request = saveQueue.current.then(async () => {
+      try {
+        await work();
+        return true;
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Unable to save scenario. Your changes have not been saved.');
+        return false;
+      } finally {
+        setPendingSaves(count => count - 1);
+      }
+    });
+    saveQueue.current = request;
+    return request;
+  };
 
   const [scenarioData, setScenarioData] = useState<Scenario | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioMap>({});
@@ -147,10 +190,12 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   };
 
   const handleSetSection = (newSection: number): void => {
+    setInputFocus(null);
     updateAppState({ action: "section", section: newSection }, scenarioIndex ?? undefined);
   };
 
   const handleSetCategory = (newCategory: string): void => {
+    setInputFocus(null);
     updateAppState({ action: "category", category: newCategory }, scenarioIndex ?? undefined);
   };
 
@@ -202,6 +247,7 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   };
 
   const handleScenarioSelection = (scenario: string | number): void => {
+    setInputFocus(null);
     navigate("/scenario", { replace: true });
     setScenarioData(scenarios[scenario]);
     setScenarioIndex(scenario);
@@ -218,27 +264,17 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     navigate("/scenario", { replace: true });
   };
 
-  const handleScenarioUpdate = (updatedScenario: any, keepOptimized?: boolean, propagateChanges?: string): void => {
-    if (updatedScenario.results.status === "Optimized" && !keepOptimized) {
-      updatedScenario.results.status = "Not Optimized";
-    }
-
-    const temp = { ...scenarios };
-    temp[scenarioIndex as any] = { ...updatedScenario };
-    setScenarios(temp);
-    setScenarioData({ ...updatedScenario });
-
-    updateScenario(port, { updatedScenario: { ...updatedScenario }, propagateChanges })
-      .then((response) => response.json())
-      .then((data) => {
-        if (propagateChanges) {
-          setScenarioData({ ...data.data });
-        }
-      })
-      .catch((e) => {
-        console.error("error on scenario update");
-        console.error(e);
-      });
+  const handleScenarioUpdate = (updatedScenario: Scenario, keepOptimized?: boolean, propagateChanges?: string): Promise<boolean> => {
+    const snapshot = JSON.parse(JSON.stringify(updatedScenario));
+    if (snapshot.results.status === 'Optimized' && !keepOptimized) snapshot.results.status = 'Not Optimized';
+    setScenarioData(snapshot);
+    return enqueueSave(async () => {
+      snapshot.input_revision = revisions.current[String(snapshot.id)] || snapshot.input_revision;
+      const response = await updateScenario(port, {updatedScenario: snapshot, propagateChanges});
+      const body = await response.json();
+      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Unable to save scenario.');
+      acceptSavedScenario(body.data);
+    });
   };
 
   const handleEditScenarioName = (newName: string, id: string | number, updateScenarioData?: boolean): void => {
@@ -269,19 +305,15 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
       });
   };
 
-  const handleUpdateExcel = (id: string | number, tableKey: string, updatedTable: any): void => {
-    updateExcel(port, { id, tableKey, updatedTable })
-      .then((response) => response.json())
-      .then((data) => {
-        handleScenarioUpdate(data, false, "json");
-        // if (data.results.status === "Optimized") {
-        //   data.results.status = "Not Optimized";
-        //   handleScenarioUpdate(data, true, "json");
-        // }
-      })
-      .catch((e) => {
-        console.error("unable to update excel: ", e);
-      });
+  const handleUpdateExcel = (id: string | number, tableKey: string, updatedTable: any): Promise<boolean> => {
+    const table = JSON.parse(JSON.stringify(updatedTable));
+    return enqueueSave(async () => {
+      const response = await updateExcel(port, {id, tableKey, updatedTable: table,
+        revision: revisions.current[String(id)] || scenarioData?.input_revision});
+      const body = await response.json();
+      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Unable to save input table.');
+      acceptSavedScenario(body);
+    });
   };
 
   const syncScenarioData = (): void => {
@@ -290,6 +322,9 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
       .then((data) => {
         setScenarios(data.data);
         setScenarioData(data.data[scenarioIndex as any]);
+        const saved = data.data[scenarioIndex as any];
+        if (saved) revisions.current[String(saved.id)] = saved.input_revision;
+        setSaveError(null);
       });
   };
 
@@ -313,18 +348,11 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
             const data = response.body;
 
             if (responseCode === 200) {
-              updateScenario(port, { updatedScenario: { ...data } })
-                .then((r) => r.json())
-                .then(() => {
-                  updateAppState({ action: "section", section: 2 }, copy_data.new_id);
-                  addTask(copy_data.new_id);
-                })
-                .catch((e) => {
-                  console.error("error on scenario update");
-                  console.error(e);
-                });
-            } else if (responseCode === 500) {
-              console.error("error code on model run: ", data.detail);
+              acceptSavedScenario(data);
+              updateAppState({action: 'section', section: 2}, copy_data.new_id);
+              addTask(copy_data.new_id);
+            } else {
+              setSaveError(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Unable to start optimization.');
             }
           })
           .catch((e) => {
@@ -432,6 +460,11 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     showCompletedOptimization,
     lastCompletedScenario,
     compareScenarioIndexes,
+    isSaving: pendingSaves > 0,
+    saveError,
+    acceptSavedScenario,
+    inputFocus,
+    focusInputIssue,
 
     setScenarios,
     setCompareScenarioIndexes,

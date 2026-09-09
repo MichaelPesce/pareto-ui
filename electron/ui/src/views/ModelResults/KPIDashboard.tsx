@@ -173,7 +173,7 @@ try {
                 </Grid>
                 <Grid item xs={12}>
                     <Box sx={{display: 'flex', justifyContent: 'center'}}>
-                    <p style={styles.kpiValue}>{Math.round(kpiData.e_CompletionsReusedFrac?.value * 100)}%</p>
+                    <p style={styles.kpiValue}>{Number.isFinite(kpiData.e_CompletionsReusedFrac?.value) ? `${Math.round(kpiData.e_CompletionsReusedFrac.value * 100)}%` : 'N/A'}</p>
                     </Box>
                 </Grid>
                 </Grid>

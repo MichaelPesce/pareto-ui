@@ -36,6 +36,7 @@ from app.internal.scenario_handler import (
 )
 
 from app.internal.model_diagnostics import scan_constraint_violations, unavailable_constraint_scan
+from app.internal.model_compatibility import prepare_model_for_ui
 
 _log = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ _log = logging.getLogger(__name__)
 def run_strategic_model(input_file, output_file, id, modelParameters, overrideValues={}):
     start_time = datetime.datetime.now()
     scenario = scenario_handler.get_scenario(int(id))
-    scenario["results"] = {"data": {}, "status": "Building model",
+    run_revision = scenario.get('input_revision')
+    scenario["results"] = {"data": {}, "status": "Building model", "input_revision": run_revision,
                            "constraints_violations": unavailable_constraint_scan()}
     scenario_handler.update_scenario(scenario)
 
@@ -71,9 +73,10 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
         df_parameters,
         default=default
     )
+    prepare_model_for_ui(strategic_model)
     
     scenario = scenario_handler.get_scenario(int(id))
-    results = {"data": {}, "status": "Solving model"}
+    results = {"data": {}, "status": "Solving model", "input_revision": run_revision}
     scenario["results"] = results
     scenario_handler.update_scenario(scenario)
     try:
@@ -141,6 +144,8 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
 
     scenario = scenario_handler.get_scenario(int(id))
     results = {"data": {}, "status": "Generating output", "terminationCondition": str(termination_condition),
+               'input_revision': run_revision,
+               'solution_status': 'optimal' if feasibility_status and termination_condition == TerminationCondition.optimal else 'feasible' if feasibility_status else 'unverified',
                "constraints_violations": constraint_violations}
     scenario["results"] = results
 
@@ -259,6 +264,9 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
 
         if results['terminationCondition'] == "infeasible":
             results['status'] = 'Infeasible'
+        elif results.get('solution_status') == 'unverified':
+            results['status'] = 'failure'
+            results['error'] = f"The solver stopped without a verified feasible solution ({results['terminationCondition']}). Review the inputs or allow more solver time."
         else:
             results['status'] = 'Optimized'
         scenario["results"] = results
@@ -273,6 +281,9 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
             "data": {}, "status": "failure", "error": str(e),
             "terminationCondition": previous_results.get("terminationCondition"),
             "constraints_violations": previous_results.get("constraints_violations") or unavailable_constraint_scan(),
+            'input_revision': previous_results.get('input_revision'),
+            'solution_status': previous_results.get('solution_status'),
+            'failure_stage': previous_results.get('status'),
         }
         scenario["results"] = results
         scenario_handler.update_scenario(scenario)
