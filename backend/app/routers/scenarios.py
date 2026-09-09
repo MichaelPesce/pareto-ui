@@ -27,7 +27,7 @@ from app.internal.KMZParser import ParseKMZ
 from app.internal.ExcelApi import WriteMapDataToExcel, PreprocessMapData
 from app.internal.ShapefileParser import extract_shp_paths, parseShapefiles
 from app.internal.util import time_it
-from app.internal.openai_client_wrapper import cborg
+from app.internal.ai_configuration import ai_configuration as cborg
 
 # _log = idaeslog.getLogger(__name__)
 _log = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ async def upload(scenario_name: str, defaultNodeType: str, file: UploadFile = Fi
             async with aiofiles.open(kmz_path, 'wb') as out_file:
                 content = await file.read()
                 await out_file.write(content) 
-            kmz_data = ParseKMZ(kmz_path, defaultNodeType)
+            kmz_data = PreprocessMapData({"map_data": ParseKMZ(kmz_path, defaultNodeType)})
             WriteMapDataToExcel(kmz_data, excel_path)
             kmz_data["defaultNode"] = defaultNodeType
             return scenario_handler.upload_excelsheet(output_path=f'{excel_path}.xlsx', scenarioName=scenario_name, filename=file.filename, map_data=kmz_data)
@@ -517,5 +517,6 @@ async def request_ai_optimization_diagnosis(request: Request, id: int) -> dict:
     """Prompt AI to diagnose a failed optimization run using scenario context."""
     req = await request.json()
     error_message = req.get("errorMessage", None)
-    diagnosis_context = req.get("diagnosisContext", None)
-    return scenario_handler.generate_optimization_diagnosis_with_ai(id, error_message, diagnosis_context)
+    if error_message is not None and not isinstance(error_message, str):
+        raise HTTPException(400, detail="errorMessage must be a string.")
+    return scenario_handler.generate_optimization_diagnosis_with_ai(id, error_message)

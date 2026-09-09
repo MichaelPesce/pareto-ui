@@ -16,7 +16,6 @@ import {
   DimensionIndexedTable,
   SeriesByKey,
   Cell,
-  MapEditorNode,
 } from 'types';
 
 export const NetworkNodeTypes = {
@@ -86,7 +85,7 @@ export const NetworkNodeTypes = {
         displayName: "Trucking Hourly Cost",
         type: "number",
         defaultValue: 0,
-        units: "USD/bbl"
+        units: "USD/hour"
       }
     ]
   },
@@ -151,7 +150,7 @@ export const NetworkNodeTypes = {
         displayName: "Trucking Hourly Cost",
         type: "number",
         defaultValue: 0,
-        units: "USD/bbl"
+        units: "USD/hour"
       }
     ]
   },
@@ -321,7 +320,7 @@ export const NetworkNodeTypes = {
         displayName: "Trucking Hourly Cost",
         type: "number",
         defaultValue: 0,
-        units: "USD/bbl"
+        units: "USD/hour"
       }
     ]
   },
@@ -364,96 +363,21 @@ export const NetworkNodeTypes = {
   }
 };
 
-const PipelineNodeTypeCodeByName: Record<string, string> = {
-  ProductionPad: "P",
-  NetworkNode: "N",
-  CompletionsPad: "C",
-  DisposalSite: "K",
-  SWDSite: "K",
-  TreatmentSite: "R",
-  StorageSite: "S",
-  ExternalWaterSource: "F",
-  ReuseOption: "O",
-};
-
-// Directed arc whitelist used everywhere pipeline endpoints are chosen or validated.
-export const AllowedPipelineArcs = new Set([
-  "PNA",
-  "CNA",
-  "CCA",
-  "NNA",
-  "NCA",
-  "NKA",
-  "NRA",
-  "NSA",
-  "FCA",
-  "RCA",
-  "RNA",
-  "RSA",
-  "SCA",
-  "SNA",
-  "ROA",
-  "RKA",
-  "SOA",
-  "NOA",
-]);
-
-export const getPipelineNodeTypeCode = (nodeType?: string): string | null => {
-  if (!nodeType) return null;
-  return PipelineNodeTypeCodeByName[nodeType] || null;
-};
-
-export const getMapEditorNodeType = (node?: MapEditorNode): string | null => {
-  if (!node) return null;
-  return node.nodeType || node.node_type || null;
-};
-
-export const isAllowedPipelineArc = (fromNodeType?: string | null, toNodeType?: string | null): boolean => {
-  const fromCode = getPipelineNodeTypeCode(fromNodeType || undefined);
-  const toCode = getPipelineNodeTypeCode(toNodeType || undefined);
-  if (!fromCode || !toCode) return false;
-  return AllowedPipelineArcs.has(`${fromCode}${toCode}A`);
-};
-
-// Filters node candidates for a specific slot in the pipeline so each adjacent pair remains valid.
-export const getAllowedPipelineConnectionCandidates = (
-  availableNodes: MapEditorNode[] = [],
-  pipelineNodes: MapEditorNode["nodes"] = [],
-  connectionIdx?: number | null,
-): MapEditorNode[] => {
-  const normalizedIdx = connectionIdx ?? pipelineNodes.length;
-  const previousConnection = normalizedIdx > 0 ? pipelineNodes[normalizedIdx - 1] : undefined;
-  const nextConnection = normalizedIdx < pipelineNodes.length ? pipelineNodes[normalizedIdx + 1] : undefined;
-  const previousNode = availableNodes.find((node) => node.name === previousConnection?.name);
-  const nextNode = availableNodes.find((node) => node.name === nextConnection?.name);
-
-  return availableNodes.filter((candidateNode) => {
-    const candidateType = getMapEditorNodeType(candidateNode);
-    if (!candidateType) return false;
-
-    if (!previousNode && !nextNode) {
-      return availableNodes.some((targetNode) =>
-        targetNode.name !== candidateNode.name && isAllowedPipelineArc(candidateType, getMapEditorNodeType(targetNode))
-      );
-    }
-
-    if (previousNode && !isAllowedPipelineArc(getMapEditorNodeType(previousNode), candidateType)) {
-      return false;
-    }
-
-    if (nextNode && !isAllowedPipelineArc(candidateType, getMapEditorNodeType(nextNode))) {
-      return false;
-    }
-
-    return true;
-  });
-};
+export {
+  AllowedPipelineArcs, getPipelineNodeTypeCode, getMapEditorNodeType, isAllowedPipelineArc,
+  getAllowedPipelineFlowDirections, getAllowedPipelineConnectionCandidates,
+  getPipelineConnectionIssues, reconcilePipelineOutgoingNodes,
+} from './pipeline';
 
 export const formatCoordinatesFromNodes = (nodes) => {
   const coordinates = [];
-  for (let n of nodes) {
-      const coords = [parseFloat(n?.coordinates?.[1]), parseFloat(n?.coordinates?.[0])]
-      coordinates.push(coords)
+  for (const node of nodes || []) {
+    const segment = node.segment_coordinates?.length ? node.segment_coordinates : [node.coordinates];
+    for (const point of segment) {
+      const coords = [Number(point?.[1]), Number(point?.[0])];
+      const previous = coordinates[coordinates.length - 1];
+      if (!previous || coords[0] !== previous[0] || coords[1] !== previous[1]) coordinates.push(coords);
+    }
   }
   return coordinates;
 }
@@ -503,6 +427,20 @@ export const calculatePipelineSegmentLengths = (nodes = []) => {
 
   return lengths;
 }
+
+// Preserve measured or manually entered lengths on segments that survive an edit.
+export const reconcilePipelineSegmentLengths = (nextNodes = [], prevNodes = [], prevLengths = []) => {
+  const calculated = calculatePipelineSegmentLengths(nextNodes);
+  return calculated.map((length, idx) => {
+    const start = nextNodes[idx], end = nextNodes[idx + 1];
+    const oldIdx = prevNodes.findIndex((node, i) =>
+      node.name === start.name && prevNodes[i + 1]?.name === end.name
+      && String(node.coordinates) === String(start.coordinates)
+      && String(prevNodes[i + 1]?.coordinates) === String(end.coordinates));
+    const previous = oldIdx >= 0 ? prevLengths[oldIdx] : undefined;
+    return typeof previous === 'number' && Number.isFinite(previous) && previous >= 0 ? previous : length;
+  });
+};
 
 export const reverseMapCoordinates = (coords: CoordinateTuple) => {
     try {
@@ -926,36 +864,6 @@ export const useKeyDown = (
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [onKeyDown]);
-};
-
-export const reconcilePipelineOutgoingNodes = (
-  nextNodes: MapEditorNode["nodes"] = [],
-  prevNodes: MapEditorNode["nodes"] = []
-): MapEditorNode["nodes"] => {
-  if (!Array.isArray(nextNodes)) return [];
-
-  return nextNodes.map((node, idx) => {
-    const previousName = nextNodes[idx - 1]?.name;
-    const nextName = nextNodes[idx + 1]?.name;
-    const outgoingNodes = new Set<string>();
-
-    const previousPairExisted = Boolean(prevNodes?.[idx - 1]?.name && prevNodes?.[idx]?.name);
-    const nextPairExisted = Boolean(prevNodes?.[idx]?.name && prevNodes?.[idx + 1]?.name);
-    const hadBackwardFlow = previousPairExisted
-      ? Array.isArray(prevNodes?.[idx]?.outgoing_nodes) && prevNodes[idx].outgoing_nodes.includes(prevNodes[idx - 1].name)
-      : Array.isArray(node?.outgoing_nodes) && Boolean(previousName) && node.outgoing_nodes.includes(previousName);
-    const hadForwardFlow = nextPairExisted
-      ? Array.isArray(prevNodes?.[idx]?.outgoing_nodes) && prevNodes[idx].outgoing_nodes.includes(prevNodes[idx + 1].name)
-      : Boolean(nextName);
-
-    if (previousName && hadBackwardFlow) outgoingNodes.add(previousName);
-    if (nextName && hadForwardFlow) outgoingNodes.add(nextName);
-
-    return {
-      ...node,
-      outgoing_nodes: Array.from(outgoingNodes),
-    };
-  });
 };
 
 export const convertMapDataToBackendFormat = (nodeData, lineData) => {

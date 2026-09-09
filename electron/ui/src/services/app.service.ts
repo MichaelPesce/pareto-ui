@@ -131,6 +131,20 @@ export const generateExcelFromMap = (backend_port: number, id: number | string) 
     });
 }
 
+export const getAIAvailability = (backend_port: number, signal?: AbortSignal) =>
+    fetch(`${BACKEND_URL}:${backend_port}/ai_available`, { signal });
+
+export const getAISettings = (backend_port: number) =>
+    fetch(`${BACKEND_URL}:${backend_port}/ai_settings`);
+
+export const saveAISettings = (backend_port: number, settings: {api_key?: string; base_url: string; model: string}) =>
+    fetch(`${BACKEND_URL}:${backend_port}/ai_settings`, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings),
+    });
+
+export const resetAISettings = (backend_port: number) =>
+    fetch(`${BACKEND_URL}:${backend_port}/ai_settings`, {method: 'DELETE'});
+
 export const requestAIDataUpdate = (backend_port: number, id: number | string, prompt: string) => {
     let endpoint = `${BACKEND_URL}:${backend_port}/request_ai_data_update/${id}`
     return fetch(endpoint, {
@@ -143,14 +157,13 @@ export const requestAIDataUpdate = (backend_port: number, id: number | string, p
 export const requestAIOptimizationDiagnosis = (
     backend_port: number,
     id: number | string,
-    errorMessage: string,
-    diagnosisContext?: any
+    errorMessage: string
 ) => {
     const endpoint = `${BACKEND_URL}:${backend_port}/request_ai_optimization_diagnosis/${id}`
     return fetch(endpoint, {
         method: 'POST',
         mode: 'cors',
-        body: JSON.stringify({ errorMessage, diagnosisContext })
+        body: JSON.stringify({ errorMessage })
     });
 }
 

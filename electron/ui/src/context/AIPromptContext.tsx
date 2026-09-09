@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { requestAIDataUpdate, requestAIOptimizationDiagnosis } from "../services/app.service";
+import { checkAIAvailability } from '../services/ai-settings.service';
 import { useApp } from "../AppContext";
 import type {
   AIPromptResponse,
@@ -22,6 +23,8 @@ type AIPromptStatus = "idle" | "running" | "success" | "error";
 type AIPromptRequestKind = "data-update" | "optimization-diagnosis" | null;
 
 export interface AIPromptContextValue {
+  isAvailable: boolean;
+  setAvailability: (available: boolean) => void;
   status: AIPromptStatus;
   requestKind: AIPromptRequestKind;
   isRunning: boolean;
@@ -32,7 +35,7 @@ export interface AIPromptContextValue {
   errorMessage: string | null;
   lastPrompt: string | null;
   runPrompt: (scenarioId: string | number, prompt: string) => Promise<void>;
-  runOptimizationDiagnosis: (scenarioId: string | number, errorMessage: string, diagnosisContext?: any) => Promise<void>;
+  runOptimizationDiagnosis: (scenarioId: string | number, errorMessage: string) => Promise<void>;
   clearResult: () => void;
 }
 
@@ -51,6 +54,12 @@ interface AIPromptProviderProps {
 export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) => {
   const { port } = useApp();
   const USE_SAMPLE_AI_RESPONSE = false;
+  const [isAvailable, setIsAvailable] = useState(false);
+  const availabilityConfigured = useRef(false);
+  const setAvailability = (available: boolean) => {
+    availabilityConfigured.current = true;
+    setIsAvailable(available);
+  };
   const [status, setStatus] = useState<AIPromptStatus>("idle");
   const [requestKind, setRequestKind] = useState<AIPromptRequestKind>(null);
   const [response, setResponse] = useState<AIPromptResponse | null>(null);
@@ -60,7 +69,30 @@ export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) 
   const [updateNotes, setUpdateNotes] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    availabilityConfigured.current = false;
+    let retry: ReturnType<typeof setTimeout>;
+    setIsAvailable(false);
+    const checkAvailability = async () => {
+      try {
+        const available = await checkAIAvailability(port, controller.signal);
+        if (!controller.signal.aborted && !availabilityConfigured.current) setIsAvailable(available);
+      } catch {
+        // AI is optional. A failed availability check should stay out of the UI.
+        if (!controller.signal.aborted && !availabilityConfigured.current) {
+          setIsAvailable(false);
+          // The desktop window can load before its local backend is ready.
+          retry = setTimeout(checkAvailability, 5000);
+        }
+      }
+    };
+    checkAvailability();
+    return () => { controller.abort(); clearTimeout(retry); };
+  }, [port]);
+
   const runPrompt = async (scenarioId: string | number, prompt: string): Promise<void> => {
+    if (!isAvailable) return;
     setStatus("running");
     setRequestKind("data-update");
     setErrorMessage(null);
@@ -114,9 +146,9 @@ export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) 
 
   const runOptimizationDiagnosis = async (
     scenarioId: string | number,
-    failureMessage: string,
-    diagnosisContext?: any
+    failureMessage: string
   ): Promise<void> => {
+    if (!isAvailable) return;
     setStatus("running");
     setRequestKind("optimization-diagnosis");
     setErrorMessage(null);
@@ -127,7 +159,7 @@ export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) 
     setLastPrompt(failureMessage);
 
     try {
-      const result = await requestAIOptimizationDiagnosis(port, scenarioId, failureMessage, diagnosisContext);
+      const result = await requestAIOptimizationDiagnosis(port, scenarioId, failureMessage);
       let payload: AIOptimizationDiagnosisResponse | null = null;
       try {
         payload = await result.json();
@@ -167,6 +199,8 @@ export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) 
 
   const value = useMemo(
     () => ({
+      isAvailable,
+      setAvailability,
       status,
       requestKind,
       isRunning: status === "running",
@@ -180,7 +214,7 @@ export const AIPromptProvider: React.FC<AIPromptProviderProps> = ({ children }) 
       runOptimizationDiagnosis,
       clearResult,
     }),
-    [status, requestKind, response, diagnosis, updatedScenario, updateNotes, errorMessage, lastPrompt]
+    [isAvailable, status, requestKind, response, diagnosis, updatedScenario, updateNotes, errorMessage, lastPrompt]
   );
 
   return <AIPromptContext.Provider value={value}>{children}</AIPromptContext.Provider>;

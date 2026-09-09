@@ -83,6 +83,8 @@ def ParseShapefile(filename, default_node = None):
             coords = (geometry.x, geometry.y)
             props["coordinates"] = parse_coord(coords)
             classifyNode(props, default_node)
+            while feature_name in all_nodes:
+                feature_name += "_"
             all_nodes[feature_name] = props
 
         elif geometry.geom_type in ("LineString", "MultiLineString"):
@@ -98,6 +100,8 @@ def ParseShapefile(filename, default_node = None):
                     ])
             props["coordinates"] = coords_list
             props["node_type"] = "path"
+            while feature_name in arcs:
+                feature_name += "_"
             arcs[feature_name] = props
 
         elif geometry.geom_type in ("Polygon", "MultiPolygon"):
@@ -174,6 +178,11 @@ def merge_parsed_data(data1, data2):
         if isinstance(val1, Mapping) and isinstance(val2, Mapping):
             merged_dict = {**val1}  # copy val1
             for subk, subv in val2.items():
+                if key in ("arcs", "all_nodes", "polygons"):
+                    while subk in merged_dict:
+                        subk += "_"
+                    merged_dict[subk] = subv
+                    continue
                 if subk in merged_dict:
                     # If both are lists, merge sets
                     if isinstance(merged_dict[subk], list) and isinstance(subv, list):

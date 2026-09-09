@@ -56,8 +56,16 @@ jobs:
         run: |
           npm --prefix electron/ui clean-install
 
+      - name: run backend regression tests
+        env:
+          PYTHONPATH: backend
+        run: python -m unittest discover -s backend/tests
+
       - name: run component tests
         run: npm --prefix electron/ui test
+
+      - name: run desktop settings tests
+        run: node --test electron/tests/*.test.cjs
 
       - name: DEBUG - pip freeze
         run: pip freeze

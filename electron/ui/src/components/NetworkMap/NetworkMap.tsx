@@ -13,8 +13,6 @@ import {
     convertMapDataToFrontendFormat,
     convertMapDataToBackendFormat,
     getAllowedPipelineConnectionCandidates,
-    getMapEditorNodeType,
-    isAllowedPipelineArc
 } from '../../util';
 import { useMapValues } from '../../context/MapContext';
 
@@ -115,7 +113,7 @@ const getFlowArrowsForLine = (line: any, lineIndex: number) => {
 
         const hasDownFlow = hasFlowBetweenNodes(nodes, idx, idx + 1);
         const hasUpFlow = hasFlowBetweenNodes(nodes, idx + 1, idx);
-        const showDownFlow = hasDownFlow || (!hasDownFlow && !hasUpFlow);
+        const showDownFlow = hasDownFlow;
         const showUpFlow = hasUpFlow;
 
         const pushArrow = (source: LatLngPair, target: LatLngPair, key: string) => {
@@ -132,21 +130,19 @@ const getFlowArrowsForLine = (line: any, lineIndex: number) => {
         };
 
         if (showDownFlow) {
-            pushArrow(fromCoords, toCoords, `${lineIndex}:${idx}:down`);
+            const route = nodes[idx]?.segment_coordinates;
+            const beforeEnd = route?.length > 1 ? toLatLngPair(route[route.length - 2]) : null;
+            pushArrow(beforeEnd || fromCoords, toCoords, `${lineIndex}:${idx}:down`);
         }
         if (showUpFlow) {
-            pushArrow(toCoords, fromCoords, `${lineIndex}:${idx}:up`);
+            const route = nodes[idx]?.segment_coordinates;
+            const afterStart = route?.length > 1 ? toLatLngPair(route[1]) : null;
+            pushArrow(afterStart || toCoords, fromCoords, `${lineIndex}:${idx}:up`);
         }
     }
 
     return arrows;
 };
-
-const getNodeTypeDisplayName = (nodeType?: string | null): string => {
-    if (!nodeType) return "This node";
-    return NetworkNodeTypes[nodeType]?.displayName || nodeType;
-};
-
 
 export default function NetworkMap(props: NetworkMapProps) {
     const { map_data, interactive = false, showMapTypeToggle = false, width = 100, height = 50 } = props;
@@ -294,24 +290,7 @@ export default function NetworkMap(props: NetworkMapProps) {
             return `Add ${candidateNode.name} as connection`;
         }
 
-        const insertIdx = pipelineConnectionSelectionIndex ?? pipelineNodes.length;
-        const previousConnection = insertIdx > 0 ? pipelineNodes[insertIdx - 1] : undefined;
-        const nextConnection = insertIdx < pipelineNodes.length ? pipelineNodes[insertIdx + 1] : undefined;
-        const previousNode = availableNodes.find((node) => node.name === previousConnection?.name);
-        const nextNode = availableNodes.find((node) => node.name === nextConnection?.name);
-        const fromNodeType = getMapEditorNodeType(previousNode);
-        const toNodeType = getMapEditorNodeType(candidateNode);
-        const nextNodeType = getMapEditorNodeType(nextNode);
-
-        if (fromNodeType && !isAllowedPipelineArc(fromNodeType, toNodeType)) {
-            return `${getNodeTypeDisplayName(fromNodeType)} cannot pipe water to ${getNodeTypeDisplayName(toNodeType)}`;
-        }
-
-        if (nextNodeType && !isAllowedPipelineArc(toNodeType, nextNodeType)) {
-            return `${getNodeTypeDisplayName(toNodeType)} cannot pipe water to ${getNodeTypeDisplayName(nextNodeType)}`;
-        }
-
-        return `${getNodeTypeDisplayName(fromNodeType)} cannot pipe water to ${getNodeTypeDisplayName(toNodeType)}`;
+        return `${candidateNode?.name || "This node"} cannot connect at this position. Check the adjacent node types.`;
     };
 
     return (

@@ -22,9 +22,8 @@ from pareto.strategic_water_management.strategic_produced_water_optimization imp
     DesalinationModel,
     CONFIG,
 )
-from pareto.utilities.get_data import get_data
 
-from app.internal.get_data import get_input_lists
+from app.internal.get_data import get_input_lists, get_data
 
 _log = logging.getLogger(__name__)
 EARTH_RADIUS_MILES = 3958.7613
@@ -270,82 +269,42 @@ def calculatePipelineLenghts(arcs):
     return arcs
 
 def determineArcsAndConnections(data):
-    """
-    Derives connections AND arcs from data.
-    Accepts: map_data output from parsed .kmz, .shp
-    Returns
-      - dict updated with connections, arcs data
-    """
-    ## possible connection types:
-    # P - N, C, K
-    # C - N, C, K, S
-    # N - N, C, K, R, S, O
-    # S - N, O, C
-    # R - C, S, N, O
-    # F - C
-    # K - 
-    ## cannot determine if trucking or piped; ASSUME ALL ARE PIPED for now
+    """Map line vertices to connections, retaining bends without self-connections."""
     arcs = data.get("arcs", {})
     all_nodes = data.get("all_nodes", {})
-    connections = {
-        "all_connections": {}
-    }
+    connections = {"all_connections": {}}
     data["connections"] = connections
-    # build arcs' node lists, nearest connections, etc.
-    ## for each arc endpoint, determine the nearest node
-    for arc_key in arcs:
-        arc = arcs[arc_key]
-        nodes = [] # node objects
-        node_list = [] # node names
-        prev_node = None
-        for arc_coordinates in arc["coordinates"]:
-            
-            min_distance = 100000.0
-            closest_node = ""
-            # check each node
-            for node_key in all_nodes:
-                node = all_nodes[node_key]
-                node_coordinates = node["coordinates"]
-                distance = calculate_distance(arc_coordinates, node_coordinates)
-                if distance < min_distance:
-                    closest_node = node_key
-                    min_distance = distance
-            origin_node = None
-            if len(node_list) > 0:
-                ## add connection
-                origin_node = node_list[-1]
-
-                ## ASSUME connections are bidirectional
-                if closest_node:
-                    if origin_node in connections["all_connections"]:
-                        connections["all_connections"][origin_node].append(closest_node)
-                    else:
-                        connections["all_connections"][origin_node] = [closest_node]
-                    if closest_node in connections["all_connections"]:
-                        connections["all_connections"][closest_node].append(origin_node)
-                    else:
-                        connections["all_connections"][closest_node] = [origin_node]
-
-            new_node = {
-                "name": closest_node,
-                "coordinates": arc_coordinates,
-                "outgoing_nodes": []
-            }
-            nodes.append(new_node)
-            node_list.append(closest_node)
-            ## update previous node's outgoing node to include this one
-            if prev_node is not None:
-                prev_node["outgoing_nodes"].append(closest_node)
-            prev_node = new_node
-        # arc['node_list'] = node_list
-        arc['nodes'] = nodes
-
-        ## the top level coordinates will no longer be necessary
-        ## we store the coordinates of each node inside the node list
-        del arc['coordinates']
-    
-    calculatePipelineLenghts(arcs)
-
+    for arc in arcs.values():
+        # Existing arcs already contain their directions and geometry when an
+        # additional map is imported. Only derive newly imported polylines.
+        if "coordinates" not in arc:
+            for node in arc.get("nodes", []):
+                outgoing = connections["all_connections"].setdefault(node["name"], [])
+                outgoing.extend(n for n in node.get("outgoing_nodes", []) if n not in outgoing)
+            continue
+        coordinates = arc.pop("coordinates")
+        selected = []
+        for idx, coords in enumerate(coordinates):
+            closest = min(all_nodes, key=lambda name: calculate_distance(coords, all_nodes[name]["coordinates"]), default=None)
+            if closest is not None and (not selected or selected[-1][0] != closest):
+                selected.append((closest, idx))
+        if len(selected) > 1:
+            selected[-1] = (selected[-1][0], len(coordinates) - 1)
+        nodes = [{"name": name, "coordinates": coordinates[idx], "outgoing_nodes": []} for name, idx in selected]
+        lengths = []
+        for idx, node in enumerate(nodes):
+            outgoing = connections["all_connections"].setdefault(node["name"], [])
+            if idx + 1 >= len(nodes):
+                continue
+            target = nodes[idx + 1]["name"]
+            node["outgoing_nodes"] = [target]
+            if target not in outgoing:
+                outgoing.append(target)
+            segment = coordinates[selected[idx][1]:selected[idx + 1][1] + 1]
+            node["segment_coordinates"] = segment
+            lengths.append(sum(calculate_distance_from_coordinates(a, b) for a, b in zip(segment, segment[1:])))
+        arc["nodes"] = nodes
+        arc["lengths"] = lengths
     return data
 
 ## TODO: we must handle elevation
@@ -584,7 +543,9 @@ def FormatOptimizationDiagnosisPrompt(error_message, scenario = None, diagnosis_
         "and optional 'cautionNotes' (array of short strings). "
         "The next steps should be ordered from most practical to least practical, and should focus on edits to input data, "
         "network assumptions, bounds, capacities, demand/supply values, treatment/disposal/reuse settings, overrides, and optimization settings like runtime, optimality gap, solver-adjacent settings already exposed in the app. "
-        "When infeasibility details are provided, use the reported violated constraints, editable input tables, and current scenario input data to recommend specific table-level changes the user can try in the app. "
+        "Use the constraint residuals and sampled input tables as clues for practical table-level changes. "
+        "Respect the supplied diagnostic limitations: current values may be initial values, and residuals do not prove which constraints cause infeasibility. "
+        "Distinguish observations from hypotheses, acknowledge missing evidence, and do not invent unseen input values or promise feasibility. "
         "If you cannot diagnose from the provided information, return status 'error' and include 'errorMessage'.\n"
     )
 
@@ -705,7 +666,7 @@ def check_for_infeasibility(scenario, excel_path):
 
     [set_list, parameter_list] = get_input_lists()
     
-    [df_sets, df_parameters] = get_data(excel_path, set_list, parameter_list)
+    [df_sets, df_parameters, _] = get_data(excel_path, set_list, parameter_list)
 
     strategic_model = create_model(
         df_sets,
@@ -729,7 +690,6 @@ def check_for_minimum_required_tables(scenario):
         "StorageSites",
         "SWDSites",
         "ExternalWaterSources",
-        # "ReuseOptions"
     ]
 
     data_input = scenario.get("data_input", {})
@@ -749,7 +709,6 @@ def check_for_minimum_required_tables(scenario):
         {"table_name": "CompletionsDemand", "allow_zero": False},
         {"table_name": "PadRates", "allow_zero": False},
         {"table_name": "FlowbackRates", "allow_zero": False},
-        # {"table_name": "ReuseMinimum", "allow_zero": True, "require_all_cells_numeric": True},
     ]
 
     capacity_tables = [
@@ -763,13 +722,17 @@ def check_for_minimum_required_tables(scenario):
 
     operational_cost_tables = [
         {"table_name": "DisposalOperationalCost", "allow_zero": False},
-        # {"table_name": "ReuseOperationalCost", "allow_zero": True},
     ]
 
-    beneficial_reuse_tables = [
-        # {"table_name": "BeneficialReuseCost", "allow_zero": False},
-        # {"table_name": "BeneficialReuseCredit", "allow_zero": False},
-    ]
+    # Beneficial reuse is optional. When present, zero minimum flow, cost, or
+    # credit is valid; negative or nonnumeric values are not.
+    beneficial_reuse_tables = []
+    if df_sets.get("ReuseOptions"):
+        forecast_tables.append({"table_name": "ReuseMinimum", "allow_zero": True, "require_all_cells_numeric": True})
+        beneficial_reuse_tables = [
+            {"table_name": "BeneficialReuseCost", "allow_zero": True},
+            {"table_name": "BeneficialReuseCredit", "allow_zero": True},
+        ]
 
     ## TODO: Trucking Time, Trucking Hours, External Water Sourcing
     ## - do we need these?

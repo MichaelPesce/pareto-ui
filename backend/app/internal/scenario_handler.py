@@ -39,7 +39,8 @@ from app.internal.util import (
 )
 from app.internal.util import check_for_missing_tables, check_for_minimum_required_tables, check_for_infeasibility
     
-from app.internal.openai_client_wrapper import cborg
+from app.internal.ai_configuration import ai_configuration as cborg
+from app.internal.model_diagnostics import build_diagnosis_context, DIAGNOSTIC_LIMITATION
 
 # _log = idaeslog.getLogger(__name__)
 _log = logging.getLogger(__name__)
@@ -1161,15 +1162,8 @@ class ScenarioHandler:
         updated["outdatedReason"] = reason
         return updated
 
-    def _serialize_prompt_context(self, data, start_chars=12000, end_chars=8000):
-        try:
-            serialized = json.dumps(data, indent=2, default=str)
-        except Exception:
-            serialized = str(data)
-        return summarize_long_text(serialized, start_chars=start_chars, end_chars=end_chars)
-
     @time_it
-    def generate_optimization_diagnosis_with_ai(self, id, error_message, diagnosis_context=None):
+    def generate_optimization_diagnosis_with_ai(self, id, error_message):
         _log.info(f"generate_optimization_diagnosis_with_ai for scenario {id}")
         try:
             scenario = self.scenario_list[id]
@@ -1185,35 +1179,17 @@ class ScenarioHandler:
                 "errorMessage": "AI client is not configured. Provide an API key to enable AI features."
             }
 
-        failure_message = error_message or scenario.get("results", {}).get("error")
+        results = scenario.get("results") or {}
+        failure_message = results.get("error") or error_message
+        if not failure_message and (results.get("status") == "Infeasible" or results.get("terminationCondition") == "infeasible"):
+            failure_message = "Optimization terminated as infeasible."
         if not failure_message:
             return {
                 "status": "error",
                 "errorMessage": "No optimization failure message was available to diagnose."
             }
 
-        scenario_context = {
-            "id": scenario.get("id"),
-            "name": scenario.get("name"),
-            "optimization": scenario.get("optimization", {}),
-            "validation": scenario.get("validation", {}),
-            "override_values": scenario.get("override_values", {}),
-            "results": {
-                "status": scenario.get("results", {}).get("status"),
-                "terminationCondition": scenario.get("results", {}).get("terminationCondition"),
-                "error": scenario.get("results", {}).get("error"),
-            },
-            "data_input": scenario.get("data_input", {}),
-        }
-
-        editable_input_tables = sorted(list((scenario.get("data_input", {}) or {}).get("df_parameters", {}).keys()))
-        stored_constraint_violations = (scenario.get("results", {}) or {}).get("constraints_violations", {})
-        prompt_diagnosis_context = diagnosis_context or {}
-        prompt_diagnosis_context.setdefault("resultsStatus", scenario.get("results", {}).get("status"))
-        prompt_diagnosis_context.setdefault("terminationCondition", scenario.get("results", {}).get("terminationCondition"))
-        prompt_diagnosis_context.setdefault("editableInputTables", editable_input_tables)
-        prompt_diagnosis_context.setdefault("constraintsViolations", stored_constraint_violations)
-        prompt_diagnosis_context.setdefault("inputData", scenario.get("data_input", {}))
+        diagnosis_context = build_diagnosis_context(scenario)
 
         truncated_failure_message = summarize_long_text(
             failure_message,
@@ -1223,8 +1199,7 @@ class ScenarioHandler:
 
         prompt = FormatOptimizationDiagnosisPrompt(
             error_message=truncated_failure_message,
-            scenario=self._serialize_prompt_context(scenario_context, start_chars=8000, end_chars=4000),
-            diagnosis_context=self._serialize_prompt_context(prompt_diagnosis_context, start_chars=14000, end_chars=8000),
+            diagnosis_context=json.dumps(diagnosis_context, default=str),
         )
         _log.info("hitting cborg for optimization diagnosis")
 
@@ -1238,18 +1213,35 @@ class ScenarioHandler:
                 "errorMessage": f"Unable to process AI diagnosis response: {e}"
             }
 
+        if not isinstance(answer, dict):
+            return {"status": "error", "errorMessage": "AI returned an invalid diagnosis."}
+
         if answer.get("status") != "success":
             return {
                 "status": "error",
-                "errorMessage": answer.get("errorMessage", "AI could not diagnose the optimization failure.")
+                "errorMessage": str(answer.get("errorMessage") or "AI could not diagnose the optimization failure.")
             }
+
+        if (
+            not isinstance(answer.get("summary"), str)
+            or not isinstance(answer.get("likelyCauses", []), list)
+            or not all(isinstance(item, str) for item in answer.get("likelyCauses", []))
+            or not isinstance(answer.get("cautionNotes", []), list)
+            or not all(isinstance(item, str) for item in answer.get("cautionNotes", []))
+            or not isinstance(answer.get("nextSteps"), list)
+            or not all(isinstance(step, dict) and isinstance(step.get("title"), str)
+                       and isinstance(step.get("instruction"), str)
+                       and all(step.get(key) is None or isinstance(step[key], str) for key in ("reason", "appArea"))
+                       for step in answer.get("nextSteps", []))
+        ):
+            return {"status": "error", "errorMessage": "AI returned an invalid diagnosis format. Please try again."}
 
         diagnosis_record = {
             "status": "success",
             "summary": answer.get("summary", ""),
             "likelyCauses": answer.get("likelyCauses", []),
             "nextSteps": answer.get("nextSteps", []),
-            "cautionNotes": answer.get("cautionNotes", []),
+            "cautionNotes": [*answer.get("cautionNotes", []), DIAGNOSTIC_LIMITATION],
             "diagnosedAt": self._utc_timestamp(),
             "sourceErrorMessage": failure_message,
             "outdated": False,

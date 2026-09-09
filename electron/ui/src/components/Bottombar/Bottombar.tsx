@@ -14,10 +14,12 @@ import AddIcon from '@mui/icons-material/Add';
 import { advanceToOptimizationSetup, generateExcelFromMap, validateScenario } from '../../services/app.service';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AIPromptDialog from '../AIPromptDialog/AIPromptDialog';
+import { useAIPrompt } from '../../context/AIPromptContext';
 import ScenarioValidationDialog from '../ScenarioValidationDialog/ScenarioValidationDialog';
 
 
 export default function Bottombar(props) {
+    const { isAvailable: isAIAvailable } = useAIPrompt();
     const {
       scenario,
       backgroundTasks,
@@ -285,7 +287,7 @@ export default function Bottombar(props) {
                             </Box> : 
                             <Box sx={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                               {validateScenarioButton}
-                              <Button
+                              {isAIAvailable && <Button
                                 sx={styles.unfilled}
                                 onClick={handleOpenAIPrompt}
                                 variant="outlined"
@@ -293,7 +295,7 @@ export default function Bottombar(props) {
                                 startIcon={<AutoAwesomeIcon />}
                               >
                                 AI Fill Inputs
-                              </Button>
+                              </Button>}
                               <Button
                                 sx={styles.filled}
                                 onClick={handleClickGenerateSpreadsheet}
@@ -374,12 +376,12 @@ export default function Bottombar(props) {
         showError={showModalError}
         errorText={modalError}
       />
-        <AIPromptDialog
+      {isAIAvailable && <AIPromptDialog
         open={openAIPrompt}
         onClose={handleCloseAIPrompt}
         scenarioId={id}
         scenarioName={name}
-      />
+      />}
       <ScenarioValidationDialog
         open={openValidationDialog}
         loading={validationLoading}

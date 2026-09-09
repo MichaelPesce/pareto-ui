@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from "react";
-import { reverseMapCoordinates, convertMapDataToBackendFormat, generateNewName, calculatePipelineSegmentLengths, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates } from "../util";
+import { reverseMapCoordinates, convertMapDataToBackendFormat, generateNewName, reconcilePipelineSegmentLengths, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates } from "../util";
 import { useApp } from '../AppContext';
 import { uploadAdditionalMap } from "../services/app.service";
 import type { Scenario } from "../types";
@@ -93,9 +93,9 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
             const prevNodes = prev.nodes || [];
             const updatedNodeList = reconcilePipelineOutgoingNodes(
                 [...prevNodes, { name: newConnectingNode.name, coordinates: newConnectingNode.coordinates }],
-                prevNodes
+                prevNodes, nodeData
             );
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prev.lengths);
             const node = {
                 ...prev,
                 nodes: updatedNodeList,
@@ -118,8 +118,8 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
                     ? { ...existingNode, name: replacementNode.name, coordinates: replacementNode.coordinates }
                     : existingNode
             );
-            const updatedNodeList = reconcilePipelineOutgoingNodes(nextNodes, prevNodes);
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const updatedNodeList = reconcilePipelineOutgoingNodes(nextNodes, prevNodes, nodeData);
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prev.lengths);
             const node = {
                 ...prev,
                 nodes: updatedNodeList,

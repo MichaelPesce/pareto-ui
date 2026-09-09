@@ -10,8 +10,6 @@
 # the Software to reproduce, distribute copies to the public, prepare derivative works, and perform
 # publicly and display publicly, and to permit others to do so.
 #####################################################################################################
-import json
-import os
 import time
 import datetime
 import logging
@@ -29,84 +27,30 @@ from pareto.strategic_water_management.strategic_produced_water_optimization imp
     DesalinationModel
 )
 from pyomo.opt import TerminationCondition
-from pareto.utilities.get_data import get_data
-from pareto.utilities.results import generate_report, PrintValues, OutputUnits, is_feasible, nostdout
+from pareto.utilities.results import generate_report, OutputUnits, is_feasible, nostdout
 from pareto.utilities.model_modifications import fix_vars
-import idaes.logger as idaeslog
 
-from app.internal.get_data import get_input_lists
+from app.internal.get_data import get_input_lists, get_data
 from app.internal.scenario_handler import (
     scenario_handler,
 )
 
+from app.internal.model_diagnostics import scan_constraint_violations, unavailable_constraint_scan
 
-# _log = idaeslog.getLogger(__name__)
 _log = logging.getLogger(__name__)
-
-from pyomo.environ import Constraint, value, Var
-
-def scan_constraint_violations(model, tol=1e-6, max_print=100):
-    print(f"scanning constraint violations")
-    violations = []
-
-    for c in model.component_objects(Constraint, active=True):
-        for idx in c:
-            con = c[idx]
-
-            try:
-                body_val = value(con.body)
-            except:
-                continue
-
-            lb = value(con.lower) if con.has_lb() else None
-            ub = value(con.upper) if con.has_ub() else None
-
-            viol = 0.0
-            side = None
-
-            if lb is not None and body_val < lb - tol:
-                viol = lb - body_val
-                side = "lower"
-            if ub is not None and body_val > ub + tol:
-                ub_viol = body_val - ub
-                if ub_viol > viol:
-                    viol = ub_viol
-                    side = "upper"
-
-            if viol > 0:
-                violations.append({
-                    "violation": viol,
-                    "side": side,
-                    "constraint": con.name,
-                    "lower_bound": lb,
-                    "body_value": body_val,
-                    "upper_bound": ub,
-                })
-
-    violations.sort(reverse=True, key=lambda x: x["violation"])
-
-    for violation in violations[:max_print]:
-        print(
-            f"{violation['constraint']}: violated {violation['side']} bound by {violation['violation']:.6g}; "
-            f"lb={violation['lower_bound']}, body={violation['body_value']}, ub={violation['upper_bound']}"
-        )
-
-    print(f"Total violated constraints found: {len(violations)}")
-    return {
-        "count": len(violations),
-        "tolerance": tol,
-        "logged_count": min(len(violations), max_print),
-        "violations": violations,
-    }
 
 
 def run_strategic_model(input_file, output_file, id, modelParameters, overrideValues={}):
     start_time = datetime.datetime.now()
+    scenario = scenario_handler.get_scenario(int(id))
+    scenario["results"] = {"data": {}, "status": "Building model",
+                           "constraints_violations": unavailable_constraint_scan()}
+    scenario_handler.update_scenario(scenario)
 
     [set_list, parameter_list] = get_input_lists()
     
     _log.info(f"getting data from excel sheet")
-    [df_sets, df_parameters] = get_data(input_file, set_list, parameter_list)
+    [df_sets, df_parameters, _] = get_data(input_file, set_list, parameter_list)
 
     _log.info(f"creating model")
     default={
@@ -168,7 +112,21 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
                 )
 
 
-    model_results = solve_model(model=strategic_model, options=options)
+    try:
+        model_results = solve_model(model=strategic_model, options=options)
+    except Exception:
+        scenario = scenario_handler.get_scenario(int(id))
+        scenario["results"]["constraints_violations"] = scan_constraint_violations(strategic_model)
+        scenario_handler.update_scenario(scenario)
+        raise
+    termination_condition = model_results.solver.termination_condition
+    constraint_violations = scan_constraint_violations(
+        strategic_model,
+        solution_state="solver_solution" if termination_condition == TerminationCondition.optimal else "current_model_values",
+    )
+    scenario = scenario_handler.get_scenario(int(id))
+    scenario["results"].update(terminationCondition=str(termination_condition), constraints_violations=constraint_violations)
+    scenario_handler.update_scenario(scenario)
     with nostdout():
         feasibility_status = is_feasible(strategic_model)
         _log.info(f"feasibility status is: {feasibility_status}")
@@ -182,7 +140,8 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
 
 
     scenario = scenario_handler.get_scenario(int(id))
-    results = {"data": {}, "status": "Generating output", "terminationCondition": termination_condition}
+    results = {"data": {}, "status": "Generating output", "terminationCondition": str(termination_condition),
+               "constraints_violations": constraint_violations}
     scenario["results"] = results
 
     ## RESET override_values
@@ -218,8 +177,6 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
 
     total_time = datetime.datetime.now() - start_time
     _log.info(f"total process took {total_time.seconds} seconds")
-
-    constraint_violations = scan_constraint_violations(model)
 
     return {
         "results_data": results_dict,
@@ -262,12 +219,7 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
         scenario = scenario_handler.get_scenario(int(id))
         results = scenario["results"]
         results['data'] = model_run_output.get("results_data", {})
-        results['constraints_violations'] = model_run_output.get("constraints_violations", {
-            "count": 0,
-            "tolerance": 1e-6,
-            "logged_count": 0,
-            "violations": [],
-        })
+        results['constraints_violations'] = model_run_output.get("constraints_violations", unavailable_constraint_scan())
         # _log.info('optimized_override_values')
         # _log.info(scenario['optimized_override_values'])
 
@@ -316,16 +268,11 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
         _log.exception(f"unable to run strategic model: {e}")
         time.sleep(2)
         scenario = scenario_handler.get_scenario(int(id))
+        previous_results = scenario.get("results") or {}
         results = {
-            "data": {},
-            "status": "failure",
-            "error": str(e),
-            "constraints_violations": {
-                "count": 0,
-                "tolerance": 1e-6,
-                "logged_count": 0,
-                "violations": [],
-            },
+            "data": {}, "status": "failure", "error": str(e),
+            "terminationCondition": previous_results.get("terminationCondition"),
+            "constraints_violations": previous_results.get("constraints_violations") or unavailable_constraint_scan(),
         }
         scenario["results"] = results
         scenario_handler.update_scenario(scenario)

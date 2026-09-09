@@ -1,3 +1,4 @@
+import ConstraintDiagnostics from "./ConstraintDiagnostics";
 import React from 'react';
 import {useEffect, useState, type ChangeEvent} from 'react';   
 import { Box, Grid, LinearProgress, Button } from '@mui/material';
@@ -34,6 +35,7 @@ export default function ModelResults(props: ModelResultsProps): JSX.Element {
   const ERROR_PREVIEW_END = 1000;
   const { port } = useApp()
   const {
+    isAvailable: isAIAvailable,
     status: aiStatus,
     requestKind,
     diagnosis,
@@ -123,39 +125,11 @@ export default function ModelResults(props: ModelResultsProps): JSX.Element {
       ? savedDiagnosis
       : null;
   const hasDiagnosis = Boolean(displayedDiagnosis);
-  const editableInputTables = Object.keys(props.scenario.data_input?.df_parameters || {}).sort();
   const constraintViolations = props.scenario.results.constraints_violations;
   const isInfeasibleStatus = props.scenario.results.status === "Infeasible";
   const shouldShowDiagnosisPanel = props.scenario.results.status === "failure" || isInfeasibleStatus;
-  const topConstraintViolations = (constraintViolations?.violations || []).slice(0, 25).map((violation) => ({
-    constraint: violation.constraint,
-    side: violation.side,
-    violation: violation.violation,
-    lower_bound: violation.lower_bound,
-    body_value: violation.body_value,
-    upper_bound: violation.upper_bound,
-  }));
-
   const handleDiagnoseError = async () => {
-    const isInfeasible = isInfeasibleStatus;
-    const diagnosisPrompt = isInfeasible
-      ? [
-          "Optimization terminated as infeasible.",
-          "Use the provided violated constraints, editable input tables, and current scenario input data to suggest practical in-app changes.",
-          `Constraint violations detected: ${constraintViolations?.count || 0}.`,
-        ].join(" ")
-      : rawFailureMessage;
-    const diagnosisContext = isInfeasible ? {
-      mode: "infeasibility",
-      constraintsViolations: constraintViolations || { count: 0, violations: [] },
-      topConstraintViolations,
-      editableInputTables,
-      inputData: props.scenario.data_input,
-      optimizationSettings: props.scenario.optimization,
-      overrideValues: props.scenario.override_values,
-    } : undefined;
-
-    await runOptimizationDiagnosis(props.scenario.id, diagnosisPrompt, diagnosisContext);
+    await runOptimizationDiagnosis(props.scenario.id, rawFailureMessage);
   }
 
   useEffect(() => {
@@ -594,7 +568,7 @@ const handleNewInfrastructureOverride = () => {
 
       </Grid>
       <Grid item xs={6} style={{alignContent:"center", alignItems:"center", justifyContent:"center"}}>
-        {shouldShowDiagnosisPanel ? 
+        {shouldShowDiagnosisPanel ?
         <Box style={{backgroundColor:'white'}} sx={{m:3, padding:2, boxShadow:3}}>
           <Box sx={{display: "flex", alignItems: "center", gap: 1, mb: 1}}>
             <ErrorOutlineIcon sx={{color: "#b42318"}} />
@@ -641,6 +615,8 @@ const handleNewInfrastructureOverride = () => {
               </Box>
             )}
           </Box>
+          <ConstraintDiagnostics summary={constraintViolations} />
+          {isAIAvailable && <>
           <Box sx={{display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, flexWrap: "wrap"}}>
             <p style={{margin: 0, color: "#51606d"}}>
               {isInfeasibleStatus
@@ -778,6 +754,7 @@ const handleNewInfrastructureOverride = () => {
               )}
             </Box>
           )}
+          </>}
         </Box> 
         : 
         props.scenario.results.status.includes("Optimized") ?

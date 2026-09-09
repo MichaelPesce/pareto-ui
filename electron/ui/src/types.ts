@@ -218,7 +218,14 @@ export interface ConstraintViolationRecord {
 export interface ConstraintViolationsSummary {
   count: number;
   tolerance: number;
-  logged_count: number;
+  logged_count?: number;
+  status?: "complete" | "partial" | "unavailable";
+  evaluated_count?: number;
+  skipped_count?: number;
+  returned_count?: number;
+  truncated?: boolean;
+  reason?: string;
+  solution_state?: "solver_solution" | "current_model_values";
   violations: ConstraintViolationRecord[];
 }
 

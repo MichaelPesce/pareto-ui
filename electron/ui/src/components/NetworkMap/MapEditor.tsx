@@ -3,7 +3,7 @@ import { Box, Button, TextField, IconButton, MenuItem, Typography, Stack, Toolti
 import { InputAdornment, InputLabel, Select, FormControl } from '@mui/material';
 import { useMapValues } from '../../context/MapContext';
 import type { CoordinateTuple, SelectedNodeState, MapEditorNode, DimensionIndexedTable, Cell } from '../../types';
-import { NetworkNodeTypes, checkIfNameIsUnique, useKeyDown, calculatePipelineSegmentLengths, convertTreatmentCapacityIncrementsToDict, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates } from '../../util';
+import { NetworkNodeTypes, checkIfNameIsUnique, useKeyDown, calculatePipelineSegmentLengths, reconcilePipelineSegmentLengths, convertTreatmentCapacityIncrementsToDict, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates, getPipelineConnectionIssues, getAllowedPipelineFlowDirections } from '../../util';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import EditIcon from '@mui/icons-material/Edit';
@@ -97,19 +97,12 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
         return getAllowedPipelineConnectionCandidates(availableNodes, nodeData?.nodes || [], connectionIdx);
     };
 
-    // Surfaces both missing-node issues and type-rule violations on existing pipelines being edited.
-    const pipelineConnectionIssueByIndex = isNode ? {} : (nodeData?.nodes || []).reduce<Record<number, string>>((issues, connectionNode, idx) => {
-        const matchingNode = availableNodes.find((node) => node?.name === connectionNode?.name);
-        if (!matchingNode) {
-            issues[idx] = "Please select a valid node.";
-            return issues;
-        }
-        const allowedOptions = getPipelineConnectionOptions(idx);
-        if (!allowedOptions.some((node) => node.name === connectionNode.name)) {
-            issues[idx] = "This node type is not allowed at this position in the pipeline.";
-        }
-        return issues;
-    }, {});
+    const pipelineConnectionIssueByIndex = isNode ? {} : getPipelineConnectionIssues(availableNodes, nodeData?.nodes || []);
+    const getAllowedDirections = (nodes: MapEditorNode["nodes"], idx: number): FlowDirection[] =>
+        getAllowedPipelineFlowDirections(
+            availableNodes.find(node => node.name === nodes?.[idx]?.name),
+            availableNodes.find(node => node.name === nodes?.[idx + 1]?.name),
+        );
     const pipelineDiameterIds = Array.isArray(PipelineDiameterValues?.PipelineDiameters) ? PipelineDiameterValues.PipelineDiameters : [];
     const pipelineDiameterDisplayValues = Array.isArray(PipelineDiameterValues?.VALUE) ? PipelineDiameterValues.VALUE : [];
     const pipelineDiameterOptions = pipelineDiameterIds.map((diameterId, idx) => ({
@@ -197,8 +190,8 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
             const nextNodes = (idx === undefined || idx === "")
                 ? [...prevNodes, { name: name, incoming: true, outgoing: true }]
                 : prevNodes.map((n, i) => i === idx ? { ...n, name: name, coordinates: connectionNode?.coordinates } : n);
-            const updatedNodeList = reconcilePipelineOutgoingNodes(nextNodes, prevNodes);
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const updatedNodeList = reconcilePipelineOutgoingNodes(nextNodes, prevNodes, availableNodes);
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prev.lengths);
             const node = {
                 ...prev,
                 nodes: updatedNodeList,
@@ -220,9 +213,9 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
             const prevNodes = prevNode.nodes || [];
             const updatedNodeList = reconcilePipelineOutgoingNodes(
                 prevNodes.filter((_, i) => i !== idx),
-                prevNodes
+                prevNodes, availableNodes
             );
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prevNode.lengths);
             const node = {
                 ...prevNode,
                 nodes: updatedNodeList,
@@ -254,7 +247,7 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
         if (isNode) return n;
         return {
             ...n,
-            nodes: reconcilePipelineOutgoingNodes(n.nodes || [], n.nodes || []),
+            nodes: reconcilePipelineOutgoingNodes(n.nodes || [], n.nodes || [], availableNodes),
             lengths: getPipelineLengths(n),
         };
     };
@@ -479,11 +472,9 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
             if (!prevNodes[idx]?.name || !prevNodes[idx + 1]?.name) return data;
 
             const currentDirection = getDirectionState(prevNodes, idx);
-            const nextDirection: FlowDirection = currentDirection === "down"
-                ? "up"
-                : currentDirection === "up"
-                    ? "bidirectional"
-                    : "down";
+            const directions = getAllowedDirections(prevNodes, idx);
+            if (!directions.length) return data;
+            const nextDirection = directions[(directions.indexOf(currentDirection) + 1) % directions.length];
 
             const updatedNodeList = prevNodes.map((n, i) => {
                 if (i === idx) {
@@ -580,7 +571,7 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
                                     key={additionalField.key}
                                     label={additionalField?.displayName}
                                     size='small'
-                                    value={nodeData[additionalField.key] || ''}
+                                    value={nodeData[additionalField.key] ?? ''}
                                     onChange={(e) => handleUpdateAdditionalField(e, additionalField.key)}
                                     type="number"
                                     variant="outlined"
@@ -701,14 +692,15 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
                                     const connectionOptions = getPipelineConnectionOptions(idx);
                                     const connectionIssue = pipelineConnectionIssueByIndex[idx];
                                     const isLastNode = idx >= (nodeData?.nodes?.length || 0) - 1;
-                                    const canToggleFlow = Boolean(name && nextNode?.name);
+                                    const allowedDirections = getAllowedDirections(nodeData?.nodes || [], idx);
+                                    const canToggleFlow = allowedDirections.length > 1 || (allowedDirections.length === 1 && Boolean(connectionIssue));
                                     const directionState = getDirectionState(nodeData?.nodes || [], idx);
 
                                     return (
                                         <Fragment key={idx}>
                                             <TableRow hover>
                                                 <TableCell sx={{ py: 0.75 }}>
-                                                    <Tooltip title={connectionIssue || ""}>
+                                                    <Tooltip title={connectionIssue || ""} disableInteractive>
                                                         <TextField
                                                             size='small'
                                                             fullWidth
@@ -726,6 +718,9 @@ export default function MapEditor({ isExpanded = false, PipelineDiameterValues, 
                                                                 }
                                                             }}
                                                         >
+                                                            {Boolean(name) && !connectionOptions.some(node => node.name === name) && (
+                                                                <MenuItem value={name} disabled>{name}</MenuItem>
+                                                            )}
                                                             {connectionOptions?.map((node) => (
                                                                 <MenuItem key={node.name} value={node.name}>
                                                                     {node.name}

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol } = require('electron')
+const { app, BrowserWindow, protocol, ipcMain, safeStorage } = require('electron')
 const log = require('electron-log');
 const Store = require("electron-store")
 const storage = new Store();
@@ -9,6 +9,8 @@ log.transports.file.level = "info";
 exports.log = (entry) => log.info(entry)
 
 const path = require('path')
+const { fileURLToPath } = require('url');
+const { createAISettings } = require('./ai-settings');
 require('dotenv').config()
 
 const axios = require('axios').default;
@@ -60,6 +62,8 @@ function createWindow() {
     width: bounds[0],
     height: bounds[1],
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
       nodeIntegration: false,
       enableRemoteModule: true,
       webSecurity: true,
@@ -176,6 +180,36 @@ const startServer = () => {
 
 
 app.whenReady().then(() => {
+    const aiSettings = createAISettings({storage, safeStorage, request: async (method, data) => {
+      try {
+        const response = await axios({method, data, url: `http://${PY_HOST}:${PY_PORT}/ai_settings`, timeout: 10000});
+        return response.data;
+      } catch (error) {
+        const detail = error.response?.data?.detail;
+        const failure = new Error(typeof detail === 'string' ? detail : 'Unable to reach AI settings. Check that the app backend is running.');
+        failure.retryable = !error.response;
+        throw failure;
+      }
+    }});
+    for (const operation of ['get', 'save', 'reset']) {
+      ipcMain.handle(`ai-settings:${operation}`, async (event, input) => {
+        const frame = event.senderFrame;
+        const win = BrowserWindow.fromWebContents(event.sender);
+        let trusted = false;
+        try {
+          const url = new URL(frame.url);
+          trusted = Boolean(win && frame === event.sender.mainFrame && (isDev
+            ? url.origin === uiURL
+            : url.protocol === 'file:' && fileURLToPath(url) === path.join(__dirname, 'index.html')));
+        } catch {}
+        if (!trusted) return {ok: false, error: 'Settings are only available from the app window.'};
+        try {
+          return {ok: true, settings: await aiSettings(operation, input)};
+        } catch (error) {
+          return {ok: false, error: error.message || 'Unable to update AI settings.', retryable: error.retryable === true};
+        }
+      });
+    }
     // Entry point
     if (isDev) {
       createWindow();

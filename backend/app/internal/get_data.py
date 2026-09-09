@@ -160,6 +160,11 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     remove_columns = ["unnamed", "proprietary data"]
     keyword_strings = ["PROPRIETARY DATA", "proprietary data", "Proprietary Data"]
     for i in _df_parameters:
+        # A one-column parameter sheet contains only row labels and no values
+        # (e.g. NOA after removing all ReuseOptions). Do not interpret its node
+        # names as parameter values, or construct bogus Pyomo indices from them.
+        if isinstance(_df_parameters[i], pd.Series):
+            _df_parameters[i] = pd.DataFrame()
         if proprietary_data is False:
             proprietary_data = any(
                 x in _df_parameters[i].values.astype(str) for x in keyword_strings
@@ -324,7 +329,12 @@ def get_data(
             "CompletionsDemand"
         ].columns.to_series()
     # The data frame for Parameters is preprocessed to match the format required by Pyomo
+    empty_tables = [name for name, frame in _df_parameters.items() if frame.empty]
     _df_parameters = _df_to_param(_df_parameters, data_column, sum_repeated_indexes)
+    # Some PARETO versions convert empty tables with headers to {column: {}}.
+    # The model requires an empty parameter dictionary, not nested empty values.
+    for name in empty_tables:
+        _df_parameters[name] = {}
     return [_df_sets, _df_parameters, frontend_parameters]
 
 

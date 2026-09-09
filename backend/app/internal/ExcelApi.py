@@ -137,16 +137,33 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
             for column, value in template_header_values.get(ws.title, {}).items():
                 ws[f'{get_column_letter(column)}2'] = value
 
-    def _resolve_default_tab_value(default_entry, tab_name):
-        if not isinstance(default_entry, dict):
-            return None
-        if tab_name in default_entry:
-            return default_entry.get(tab_name)
+    def _write_expansion_matrix(tab, row_keys, column_keys, key_headers, default_value):
+        """Preserve entered values by their identifiers, including when rows move."""
+        ws = wb[tab]
+        key_count = len(key_headers)
+        existing = {}
+        for row in ws.iter_rows(min_row=3, values_only=True):
+            keys = tuple(row[:key_count])
+            if any(key in (None, "") for key in keys):
+                continue
+            for column, cell_value in enumerate(row[key_count:], start=key_count + 1):
+                capacity = ws.cell(2, column).value
+                if capacity not in (None, "") and cell_value not in (None, ""):
+                    existing[(*keys, capacity)] = cell_value
 
-        nested_table = default_entry.get(tab_name)
-        if isinstance(nested_table, dict):
-            return nested_table.get(tab_name)
-        return None
+        # Rebuild the matrix so removed nodes and old columns cannot leave stale data.
+        _clear_cells(ws, 2, ws.max_row, 1, ws.max_column)
+        if not row_keys:
+            return
+        for column, header in enumerate([*key_headers, *column_keys], start=1):
+            ws.cell(2, column, header)
+        for row, keys in enumerate(row_keys, start=3):
+            for column, key in enumerate(keys, start=1):
+                ws.cell(row, column, key)
+            for column, capacity in enumerate(column_keys, start=key_count + 1):
+                ws.cell(row, column).value = existing.get(
+                    (*keys, capacity), default_value(keys, capacity)
+                )
 
     ## step 2.5: add TreatmentTechnologies table
     ws = wb["TreatmentTechnologies"]
@@ -676,43 +693,17 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
         "StorageExpansionLeadTime": {"node": "StorageSites", "default": "StorageCapacities"},
     }
 
-    for expansion_tab in expansion_tabs:
-        ws = wb[expansion_tab]
-        node_key = expansion_tabs[expansion_tab]["node"]
-        default_key = expansion_tabs[expansion_tab]["default"]
-        default_values = defaults.get(default_key, {})
-        nodes = data.get(node_key, {})
-        has_data = len(nodes) > 0 and len(default_values) > 0
-        _sync_template_headers(ws, has_data=has_data)
-        if not has_data:
-            _clear_antiquated_rows(ws, 3, [1], max_row=500, clear_from_col=1, clear_to_col=ws.max_column, label=expansion_tab)
-            _clear_antiquated_columns(ws, 2, 2, max_column=ws.max_column, clear_from_row=2, clear_to_row=ws.max_row, label=expansion_tab)
-            continue
+    for expansion_tab, config in expansion_tabs.items():
+        node_key = config["node"]
+        default_values = defaults[config["default"]]
+        _write_expansion_matrix(
+            expansion_tab,
+            [(node,) for node in data.get(node_key, {})],
+            list(default_values),
+            [node_key],
+            lambda keys, capacity: default_values[capacity].get(expansion_tab),
+        )
 
-        ws[f'{get_column_letter(1)}2'] = node_key
-
-        # add column headers from the referenced defaults table
-        column = 2
-        for header in default_values:
-            columnHeaderCellLocation = f'{get_column_letter(column)}{2}'
-            ws[columnHeaderCellLocation] = header
-            column += 1
-
-        row = 3
-        _print(f'{expansion_tab}: adding {node_key}')
-        for node in nodes:
-            cellLocation = f'{get_column_letter(1)}{row}'
-            ws[cellLocation] = node
-            value_column = 2
-            for _, default_entry in default_values.items():
-                valueCellLocation = f'{get_column_letter(value_column)}{row}'
-                ws[valueCellLocation] = _resolve_default_tab_value(default_entry, expansion_tab)
-                value_column += 1
-            row += 1
-
-        _clear_antiquated_rows(ws, row, [1], max_row=500, clear_from_col=1, clear_to_col=column - 1, label=expansion_tab)
-        _clear_antiquated_columns(ws, column, 2, max_column=ws.max_column, clear_from_row=2, clear_to_row=row - 1, label=expansion_tab)
-    
     capacity_increments_tabs = {
         # "DisposalCapacityIncrements": {"default": "InjectionCapacities"},
         "StorageCapacityIncrements": {"default": "StorageCapacities"},
@@ -878,109 +869,33 @@ def WriteMapDataToExcel(data, output_file_name, template_location = None):
                 row+=1
         _clear_antiquated_rows(ws, row, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=3, label=tab)
 
-    tabs = {
-        "TreatmentExpansionLeadTime": "TreatmentSites"
-    }
-    
-    for tab in tabs:
-        ws = wb[tab]
-        node_key = tabs[tab]
-        has_data = len(data.get(node_key, {})) > 0 and len(treatment_technologies) > 0
-        _sync_template_headers(ws, has_data=has_data)
-        if not has_data:
-            _clear_antiquated_rows(ws, 3, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=ws.max_column, label=tab)
-            continue
-        row = 3
-        column = 3
-        # add column header
-        for cap in treatment_capacities:
-            columnHeaderCellLocation = f'{get_column_letter(column)}{2}'
-            ws[columnHeaderCellLocation] = cap
-            column+=1
-        for technology in treatment_technologies:
-            _print(f'tab {tab}: adding {technology}')
-            for node in data.get(node_key, {}):
-                treatmentCellLocation = f'{get_column_letter(1)}{row}'
-                technologyCellLocation = f'{get_column_letter(2)}{row}'
-                ws[treatmentCellLocation] = node
-                ws[technologyCellLocation] = technology
-                i = 3
-                for treatmentCapacity in treatment_capacities:
-                    value = treatment_capacities[treatmentCapacity][tab]
-                    cellLocation = f'{get_column_letter(i)}{row}'
-                    ws[cellLocation] = value
-                    i+=1
-                row+=1
-        _clear_antiquated_rows(ws, row, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=column - 1, label=tab)
+    treatment_rows = [
+        (node, technology)
+        for technology in treatment_technologies
+        for node in data.get("TreatmentSites", {})
+    ]
+    for tab in ("TreatmentExpansionLeadTime", "TreatmentExpansionCost"):
+        _write_expansion_matrix(
+            tab, treatment_rows, list(treatment_capacities),
+            ["TreatmentSites", "TreatmentTechnologies"],
+            lambda keys, capacity: (
+                treatment_capacities[capacity][tab]
+                if tab == "TreatmentExpansionLeadTime"
+                else treatment_technologies[keys[1]][tab]
+            ),
+        )
 
-    tabs = {
-        "TreatmentExpansionCost": {"node": "TreatmentSites", "default": "TreatmentTechnologies"}
-    }
-    
-    for tab in tabs:
-        ws = wb[tab]
-        node_key = tabs[tab]["node"]
-        has_data = len(data.get(node_key, {})) > 0 and len(defaults[tabs[tab]["default"]]) > 0
-        _sync_template_headers(ws, has_data=has_data)
-        if not has_data:
-            _clear_antiquated_rows(ws, 3, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=ws.max_column, label=tab)
-            continue
-        row = 3
-        column = 3
-        # add column headers
-        for cap in treatment_capacities:
-            columnHeaderCellLocation = f'{get_column_letter(column)}{2}'
-            ws[columnHeaderCellLocation] = cap
-            column+=1
-        
-        for default in defaults[tabs[tab]["default"]]:
-            default_values = defaults[tabs[tab]["default"]][default]
-            _print(f'tab {tab}: adding {default}')
-            for node in data.get(node_key, {}):
-                treatmentCellLocation = f'{get_column_letter(1)}{row}'
-                technologyCellLocation = f'{get_column_letter(2)}{row}'
-                ws[treatmentCellLocation] = node
-                ws[technologyCellLocation] = default
-                i = 3
-                value = default_values[tab]
-                for treatmentCapacity in treatment_capacities:
-                    valueCellLocation = f'{get_column_letter(i)}{row}'
-                    ws[valueCellLocation] = value
-                    i+=1
-                row+=1
-        _clear_antiquated_rows(ws, row, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=column - 1, label=tab)
-
-
-    tabs = {
-        "PipelineCapexCapacityBased": {"node": "connections", "default": "PipelineDiameters"},
-        "PipelineExpansionLeadTime_Capac": {"node": "connections", "default": "PipelineDiameters"},
-    }
-    for tab in tabs:
-        ws = wb[tab]
-        node_key = tabs[tab]["node"]
-        has_data = len(data.get(node_key, {}).get('all_connections', {})) > 0
-        _sync_template_headers(ws, has_data=has_data)
-        if not has_data:
-            _clear_antiquated_rows(ws, 3, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=ws.max_column, label=tab)
-            continue
-        row = 2
-        column = 3
-        default_values = defaults[tabs[tab]["default"]]
-        # add column headers
-        for each in default_values:
-            cellLocation = f'{get_column_letter(column)}{row}'
-            ws[cellLocation] = each
-            column+=1
-        row = 3
-        for location in data.get(node_key, {})['all_connections']:
-            for destination in data.get(node_key, {}).get('all_connections', {}).get(location, []):
-                _print(f'{tab}: adding {location}:{destination} arc')
-                locationCellLocation = f'{get_column_letter(1)}{row}'
-                destinationCellLocation = f'{get_column_letter(2)}{row}'
-                ws[locationCellLocation] = location
-                ws[destinationCellLocation] = destination
-                row+=1
-        _clear_antiquated_rows(ws, row, [1, 2], max_row=1000, clear_from_col=1, clear_to_col=column - 1, label=tab)
+    pipeline_rows = list(dict.fromkeys(
+        (source, destination)
+        for source, destinations in data.get("connections", {}).get("all_connections", {}).items()
+        for destination in destinations
+        if source != destination
+    ))
+    for tab in ("PipelineCapexCapacityBased", "PipelineExpansionLeadTime_Capac"):
+        _write_expansion_matrix(
+            tab, pipeline_rows, list(pipeline_diameters), ["NODES", "NODES"],
+            lambda keys, capacity: pipeline_diameters[capacity].get(tab),
+        )
 
     disposal_tabs = {
         "SWDDeep": "SWDSites",
@@ -1156,33 +1071,23 @@ def determineConnectionsFromArcs(data, pipeline_diameter_values, pipeline_capaci
             connecting_node_name = connecting_node["name"]
             outgoing_nodes = connecting_node.get("outgoing_nodes", [])
             current_outgoing_nodes = connections["all_connections"].get(connecting_node_name, [])
-            current_outgoing_nodes.extend(outgoing_nodes)
+            current_outgoing_nodes.extend(n for n in outgoing_nodes if n != connecting_node_name and n not in current_outgoing_nodes)
             connections["all_connections"][connecting_node_name] = current_outgoing_nodes
 
-        ## ALSO, store connections as key value in the following format:
-        ## <node1_node2>: {diameter: <diameter-value>, length: <length-value>}
-        i = 0
-        nodes_amt = len(nodes)
-        for pipeline_length in pipeline_lengths:
-            if pipeline_length > 0 and nodes_amt > i:
-                node1 = nodes[i]
-                node1_name = node1["name"]
-                node2 = nodes[i+1]
-                node2_name = node2["name"]
-                connection_key = f"{node1_name}::{node2_name}"
-                # print(f"adding metadata for {connection_key}")
-                connection_meta = {
+        # Capacity and distance belong to each enabled direction of a segment.
+        for idx, pipeline_length in enumerate(pipeline_lengths[:max(0, len(nodes) - 1)]):
+            if pipeline_length is None or pipeline_length < 0:
+                continue
+            source, target = nodes[idx], nodes[idx + 1]
+            for start, end in ((source, target), (target, source)):
+                if start["name"] == end["name"] or end["name"] not in start.get("outgoing_nodes", []):
+                    continue
+                connections["connection_metadata"][f'{start["name"]}::{end["name"]}'] = {
                     "pipeline_length": pipeline_length,
                     "pipeline_diameter": pipeline_diameter_values.get(diameter),
                     "pipeline_capacity": pipeline_capacity_increments.get(diameter),
                 }
-                # print(f"{connection_meta}")
-                connections["connection_metadata"][connection_key] = connection_meta
-                i+=1
-            else:
-                break
 
-    # print(f"{data}")
     return data
 
 def _column_table_to_dict(table_data, key_column="PipelineDiameters", value_column="VALUE"):
@@ -1230,6 +1135,7 @@ def PreprocessMapData(data_input):
     default_node_type = map_data.get("defaultNode", "NetworkNode") ## default to network node if we don't have a default node type
 
     excel_data = {
+        **map_data,
         'all_nodes': all_nodes,
         'arcs': map_data.get("arcs", {}),
         'polygons': map_data.get("polygons", {}),
