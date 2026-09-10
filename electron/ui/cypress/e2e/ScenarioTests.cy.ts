@@ -164,7 +164,7 @@ describe('scenario testing', () => {
         
         // Validation can take longer than the default command timeout on Windows.
         // Match the canonical endpoint after FastAPI's trailing-slash redirect.
-        cy.intercept('POST', '**/run_model').as('startOptimization')
+        cy.intercept('POST', /\/run_model$/).as('startOptimization')
         cy.findAllByRole('button', {name: /optimize/i}).eq(0).click()
 
         cy.wait('@startOptimization', {responseTimeout: 120000})
