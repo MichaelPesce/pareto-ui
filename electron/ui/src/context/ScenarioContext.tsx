@@ -11,6 +11,7 @@ import {
   runModel,
 } from "../services/app.service";
 import { useApp } from "../AppContext";
+import {applyScenarioEdits, copyScenario as copyInputs, scenarioEdits, ScenarioEdit} from '../scenarioEdits';
 
 type NavigateFn = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -77,7 +78,11 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   const [pendingSaves, setPendingSaves] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const revisions = useRef<Record<string, string>>({});
+  const savedScenarios = useRef<Record<string, Scenario>>({});
+  const drafts = useRef<Record<string, Scenario>>({});
+  const pendingEdits = useRef<Record<string, Array<{edits: ScenarioEdit[]}>>>({});
+  const failedSaves = useRef(new Map<string, string>());
+  const selectedId = useRef<string | null>(null);
   const [inputFocus, setInputFocus] = useState<ValidationIssue | null>(null);
   const focusInputIssue = (issue: ValidationIssue) => {
     const target = issue.area === 'map' ? 'Network Diagram' : issue.table === 'TimePeriods' ? 'Complete Scenario Inputs' : issue.table || 'Complete Scenario Inputs';
@@ -90,20 +95,28 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     setCategory(target);
     setAppState(previous => ({...previous, section: 0, category: {...previous?.category, 0: target}} as AppState));
   };
-  const acceptSavedScenario = (saved: Scenario) => {
-    revisions.current[String(saved.id)] = saved.input_revision;
-    setScenarios(previous => ({...previous, [saved.id]: saved}));
-    setScenarioData(previous => String(previous?.id) === String(saved.id) ? saved : previous);
-    setSaveError(null);
+  const publishDraft = (draft: Scenario) => {
+    // Keep an independent baseline even when a form mutates its scenario prop.
+    drafts.current[String(draft.id)] = copyInputs(draft);
+    setScenarios(previous => ({...previous, [draft.id]: draft}));
+    setScenarioData(previous => String(previous?.id) === String(draft.id) ? draft : previous);
   };
-  const enqueueSave = (work: () => Promise<void>): Promise<boolean> => {
+  const acceptSavedScenario = (saved: Scenario) => {
+    const id = String(saved.id);
+    savedScenarios.current[id] = copyInputs(saved);
+    const draft = (pendingEdits.current[id] || []).reduce(
+      (current, pending) => applyScenarioEdits(current, pending.edits), copyInputs(saved));
+    publishDraft(draft);
+    if (selectedId.current === id) setSaveError(failedSaves.current.get(id) || null);
+  };
+  const enqueueSave = (id: string, work: () => Promise<void>): Promise<boolean> => {
     setPendingSaves(count => count + 1);
     const request = saveQueue.current.then(async () => {
       try {
         await work();
         return true;
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : 'Unable to save scenario. Your changes have not been saved.');
+        if (selectedId.current === id) setSaveError(error instanceof Error ? error.message : 'Unable to save scenario. Your changes have not been saved.');
         return false;
       } finally {
         setPendingSaves(count => count - 1);
@@ -111,6 +124,25 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     });
     saveQueue.current = request;
     return request;
+  };
+  const queueScenarioEdit = (base: Scenario, edits: ScenarioEdit[], send: (current: Scenario) => Promise<Scenario>): Promise<boolean> => {
+    const id = String(base.id);
+    if (!savedScenarios.current[id]) savedScenarios.current[id] = copyInputs(base);
+    const pending = {edits};
+    pendingEdits.current[id] = [...(pendingEdits.current[id] || []), pending];
+    publishDraft(applyScenarioEdits(base, edits));
+    return enqueueSave(id, async () => {
+      if (failedSaves.current.has(id)) throw new Error('A previous save failed. Reload saved inputs before making more changes.');
+      try {
+        const saved = await send(applyScenarioEdits(savedScenarios.current[id], edits));
+        pendingEdits.current[id] = pendingEdits.current[id].filter(item => item !== pending);
+        acceptSavedScenario(saved);
+      } catch (error) {
+        // Keep unsaved edits visible, but do not let later requests hide a failed save.
+        failedSaves.current.set(id, error instanceof Error ? error.message : 'Unable to save scenario. Reload saved inputs before making more changes.');
+        throw error;
+      }
+    });
   };
 
   const [scenarioData, setScenarioData] = useState<Scenario | null>(null);
@@ -247,14 +279,22 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   };
 
   const handleScenarioSelection = (scenario: string | number): void => {
+    selectedId.current = String(scenario);
     setInputFocus(null);
     navigate("/scenario", { replace: true });
-    setScenarioData(scenarios[scenario]);
+    const draft = pendingEdits.current[String(scenario)]?.length ? drafts.current[String(scenario)] : scenarios[scenario];
+    if (!pendingEdits.current[String(scenario)]?.length) savedScenarios.current[String(scenario)] = copyInputs(scenarios[scenario]);
+    drafts.current[String(scenario)] = copyInputs(draft);
+    setSaveError(failedSaves.current.get(String(scenario)) || null);
+    setScenarioData(draft);
     setScenarioIndex(scenario);
     updateAppState({ action: "select" }, scenario);
   };
 
   const handleNewScenario = (data: Scenario): void => {
+    selectedId.current = String(data.id);
+    savedScenarios.current[String(data.id)] = copyInputs(data);
+    drafts.current[String(data.id)] = copyInputs(data);
     const temp = { ...scenarios };
     temp[data.id] = data;
     setScenarios(temp);
@@ -265,31 +305,20 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   };
 
   const handleScenarioUpdate = (updatedScenario: Scenario, keepOptimized?: boolean, propagateChanges?: string): Promise<boolean> => {
-    const snapshot = JSON.parse(JSON.stringify(updatedScenario));
+    const snapshot = copyInputs(updatedScenario);
     if (snapshot.results.status === 'Optimized' && !keepOptimized) snapshot.results.status = 'Not Optimized';
-    setScenarioData(snapshot);
-    return enqueueSave(async () => {
-      snapshot.input_revision = revisions.current[String(snapshot.id)] || snapshot.input_revision;
-      const response = await updateScenario(port, {updatedScenario: snapshot, propagateChanges});
+    const base = drafts.current[String(snapshot.id)] || scenarios[snapshot.id] || snapshot;
+    return queueScenarioEdit(base, scenarioEdits(base, snapshot), async current => {
+      const response = await updateScenario(port, {updatedScenario: current, propagateChanges});
       const body = await response.json();
       if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Unable to save scenario.');
-      acceptSavedScenario(body.data);
+      return body.data;
     });
   };
 
   const handleEditScenarioName = (newName: string, id: string | number, updateScenarioData?: boolean): void => {
-    const tempScenarios = { ...scenarios };
-    const tempScenario = tempScenarios[id];
-    tempScenario.name = newName;
-    tempScenarios[id] = tempScenario;
-
-    setScenarios(tempScenarios);
-    if (updateScenarioData) setScenarioData(tempScenario);
-
-    updateScenario(port, { updatedScenario: tempScenario }).catch((e) => {
-      console.error("error on scenario update");
-      console.error(e);
-    });
+    const draft = drafts.current[String(id)] || scenarios[id];
+    void handleScenarioUpdate({...draft, name: newName}, true);
   };
 
   const handleDeleteScenario = (index: string | number): void => {
@@ -306,25 +335,31 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
   };
 
   const handleUpdateExcel = (id: string | number, tableKey: string, updatedTable: any): Promise<boolean> => {
-    const table = JSON.parse(JSON.stringify(updatedTable));
-    return enqueueSave(async () => {
+    const table = copyInputs(updatedTable);
+    const base = drafts.current[String(id)] || scenarios[id];
+    const edits = [{path: ['data_input', 'df_parameters', tableKey], value: table}];
+    return queueScenarioEdit(base, edits, async current => {
       const response = await updateExcel(port, {id, tableKey, updatedTable: table,
-        revision: revisions.current[String(id)] || scenarioData?.input_revision});
+        revision: current.input_revision});
       const body = await response.json();
       if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Unable to save input table.');
-      acceptSavedScenario(body);
+      return body;
     });
   };
 
   const syncScenarioData = (): void => {
+    if (pendingSaves > 0) return;
     fetchScenarios(port)
       .then((response) => response.json())
       .then((data) => {
         setScenarios(data.data);
-        setScenarioData(data.data[scenarioIndex as any]);
         const saved = data.data[scenarioIndex as any];
-        if (saved) revisions.current[String(saved.id)] = saved.input_revision;
-        setSaveError(null);
+        if (saved) {
+          const id = String(saved.id);
+          pendingEdits.current[id] = [];
+          failedSaves.current.delete(id);
+          acceptSavedScenario(saved);
+        }
       });
   };
 
@@ -337,6 +372,9 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     copyScenario(port, scenarioIndex, newScenarioName)
       .then((response) => response.json())
       .then((copy_data) => {
+        selectedId.current = String(copy_data.new_id);
+        savedScenarios.current[String(copy_data.new_id)] = copyInputs(copy_data.scenarios[copy_data.new_id]);
+        drafts.current[String(copy_data.new_id)] = copyInputs(copy_data.scenarios[copy_data.new_id]);
         setScenarios(copy_data.scenarios);
         setScenarioIndex(copy_data.new_id);
         setScenarioData(copy_data.scenarios[copy_data.new_id]);

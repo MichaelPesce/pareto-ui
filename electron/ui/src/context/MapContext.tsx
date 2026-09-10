@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from "react";
 import { reverseMapCoordinates, convertMapDataToBackendFormat, generateNewName, reconcilePipelineSegmentLengths, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates } from "../util";
 import { useApp } from '../AppContext';
+import { useScenario } from './ScenarioContext';
 import { uploadAdditionalMap } from "../services/app.service";
 import type { Scenario } from "../types";
 import type { CoordinateTuple, MapEditorNode, SelectedNodeState, MapContextValue, MapProviderProps } from "../types";
@@ -11,6 +12,7 @@ const MapContext = createContext<MapContextValue | undefined>(undefined);
 // Provider component
 export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, handleUpdateScenario }) => {
     const { port } = useApp();
+    const { acceptSavedScenario } = useScenario();
     const [ lineData, setLineData ] = useState<MapEditorNode[]>([]);
     const [ nodeData, setNodeData ] = useState<MapEditorNode[]>([]);
     const [networkMapData, setNetworkMapData] = useState<any>([]);
@@ -265,7 +267,7 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
         if (response.status === 200) {
             response.json()
             .then((data)=>{
-                handleUpdateScenario(data)
+                acceptSavedScenario(data)
             }).catch((err)=>{
                 console.error(String(err))
                 // setShowError(true)

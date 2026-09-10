@@ -156,10 +156,10 @@ export default function Dashboard() {
       </Grid>
       <Grid item xs={12}>
       {runError && <Alert severity="error" action={<Button onClick={() => {handleSetSection(0); setRunError(null);}}>Review inputs</Button>}>{runError}</Alert>}
-      {saveError && <Alert severity="error" action={<Button onClick={syncScenarioData}>Reload saved inputs</Button>}>{saveError}</Alert>}
+      {saveError && <Alert severity="error" action={<Button disabled={isSaving} onClick={syncScenarioData}>Reload saved inputs</Button>}>{saveError}</Alert>}
       {isSaving && <Alert severity="info">Saving scenario…</Alert>}
       {(scenario && section === 0 && category === 'Complete Scenario Inputs') && <ScenarioCompletion scenario={scenario}
-        disabled={inputDataEdited || isSaving || backgroundTasks.includes(scenario.id)} onSelect={focusInputIssue} />}
+        disabled={inputDataEdited || isSaving || !!saveError || backgroundTasks.includes(scenario.id)} onSelect={focusInputIssue} />}
       {(scenario && section===0 && category !== 'Complete Scenario Inputs') &&
         <DataInput 
           handleUpdateExcel={handleUpdateExcel} 
@@ -180,7 +180,7 @@ export default function Dashboard() {
           handleRunModel={handleRunModel}
           backgroundTasks={backgroundTasks} 
           disabled={disableOptimize}
-          saving={isSaving}
+          saving={isSaving || !!saveError}
           setDisabled={setDisableOptimize}
         />
       }
@@ -199,7 +199,7 @@ export default function Dashboard() {
       </Grid>
     </Grid>
     <Bottombar
-      saving={isSaving}
+      saving={isSaving || !!saveError}
       focusInputIssue={focusInputIssue}
       handleSelection={handleSetSection} 
       handleSetCategory={handleSetCategory}
