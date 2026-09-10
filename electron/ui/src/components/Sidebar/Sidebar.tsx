@@ -41,7 +41,6 @@ export default function Sidebar(props: SidebarProps) {
 
   const isIncomplete = results?.status === "Incomplete";
   const hasMapData = data_input?.map_data;
-  const showMapEditor = category === "Network Diagram" && hasMapData;
   const focusedIssue = useRef<typeof inputFocus>(null);
   const hasSelectedMapItem = Boolean(selectedNode && (showNetworkNode || showNetworkPipeline));
   const [ isMapEditorExpanded, setIsMapEditorExpanded ] = useState<boolean>(false);
@@ -52,6 +51,10 @@ export default function Sidebar(props: SidebarProps) {
   const [ openStatic, setOpenStatic ] = useState<boolean>(false)
   const [ openResultsTables, setOpenResultsTables ] = useState<boolean>(false)
   const [ overrideList, setOverrideList ] = useState<string[]>([])
+  const isInputSection = section === 0;
+  const isOptimizationSettings = section === 1;
+  const isOutputSection = section === 2;
+  const showMapEditor = category === "Network Diagram" && hasMapData && isInputSection;
   const validationIssueTables = useMemo(() => {
     const missingTables = validation?.missing_tables || [];
     const tablesWithIssues = validation?.tables_with_issues || [];
@@ -198,7 +201,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderMapOptions = () => {
-    const categories = {"Input Summary" :null, ...(section === 0 ? {"Complete Scenario Inputs": null} : {}), "Network Diagram": null}
+    const categories = {"Input Summary" :null, ...(isInputSection ? {"Complete Scenario Inputs": null} : {}), "Network Diagram": null}
     const inputSummaryLabel = isIncomplete ? "PARETO Input File" : "Input Summary";
     return (
       Object.entries(categories).map( ([k, value]) => ( 
@@ -212,7 +215,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderAdditionalCategories = () => {
-    const additionalCategories = section === 0 ? {"Input Summary" :null, "Complete Scenario Inputs": null, "Network Diagram": null, "Plots": null} : section === 1 ? {} : {"Dashboard": null, "Sankey": null, "Network Diagram": null}
+    const additionalCategories = isInputSection ? {"Input Summary" :null, "Complete Scenario Inputs": null, "Network Diagram": null, "Plots": null} : isOptimizationSettings ? {} : {"Dashboard": null, "Sankey": null, "Network Diagram": null}
     return (
       Object.entries(additionalCategories).map( ([k, value]) => ( 
         <div style={String(category)===k ? styles.selected : styles.unselected} onClick={() => handleClick(k)} key={`${value}${k}`}> 
@@ -225,7 +228,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderTopLevelCategories = () => {
-    if (section === 0) {
+    if (isInputSection) {
       return (
         <div>
           <div style={getStyle("Dynamic")}  onClick={() => setOpenDynamic(!openDynamic)}> 
@@ -250,7 +253,7 @@ export default function Sidebar(props: SidebarProps) {
           {renderStaticCategories()}
         </div>
       ) 
-    }else if (section ===2) {
+    }else if (isOutputSection) {
       return (
         <>
         <div style={category==="Results Tables" ? styles.selected : styles.unselected} onClick={() => setOpenResultsTables(!openResultsTables)}> 
@@ -433,7 +436,7 @@ export default function Sidebar(props: SidebarProps) {
             }
             {
               scenario && hasMapData && (
-                 category === "Network Diagram" &&
+                 (category === "Network Diagram" && isInputSection) &&
                 <MapEditor 
                   isExpanded={isMapEditorExpanded}
                   PipelineDiameterValues={PipelineDiameterValues}
