@@ -37,8 +37,10 @@ tolerance of `1e-7` against evaluated linear-term magnitudes, accounting for CBC
 rounded text output (including cost equalities whose bound is zero). Used-variable
 bounds and discrete decisions are checked separately; missing values fail
 verification. Diagnostic scans without solver verification retain their strict
-absolute tolerance. This avoids rejecting a multi-billion-dollar solution for
-sub-dollar-to-hundreds-of-dollars rounding while still detecting flow shortfalls.
+absolute tolerance. This accommodates rounded large cost totals. A remaining
+review issue is that large coefficients in physical constraints can also inflate
+the relative allowance and hide smaller flow residuals; the tolerance needs a
+narrower scope before treating this verification as reliable for those cases.
 
 Optional facilities have conditional input rules. Advanced modes remain available
 with additional data checks and model construction; comprehensive guidance and
@@ -56,9 +58,11 @@ directions; table-only routes remain available in tables.
 
 Exports use the saved workbook. Validation and optimization use temporary input
 snapshots from the same canonical data. Input changes refresh deterministic issues
-and table highlights while invalidating old model/feasibility evidence; stale
-edits and edits during optimization are rejected. The UI waits for save
-confirmation and provides an error/reload action on failure.
+and table highlights while invalidating old model/feasibility evidence. The backend
+rejects stale supplied revisions and edits during optimization. The UI disables
+optimization while saves are pending and provides an error/reload action on
+failure. Rapid settings edits still need a fix to preserve newer local changes
+when earlier save responses arrive.
 
 Section autofill derives eligible missing/invalid numeric cells from the same
 requirements, independently of the 250 displayed-issue limit. Preview lists counts
@@ -95,6 +99,13 @@ and classify them, set forecasts and periods, validate, solve with CBC, and asse
 that a results workbook is available. They cover changed settings, stale validation,
 edits during a run, renames, and export preservation. CBC-dependent tests skip
 explicitly if the solver is unavailable. Test databases are temporary.
+
+The [public practice files](../examples/map-to-optimization/README.md) provide a
+small manual acceptance case available in a fresh clone. Both map formats and the
+completed workbook have been verified through the backend with CBC. The
+[Windows CI run for PR #112](https://github.com/project-pareto/pareto-ui/actions/runs/34480658345/job/102882317587)
+exposed open workbook handles during atomic replacement;
+explicitly closing readers before replacement remains a release blocker.
 
 The local `map_testing/strategic_toy_case_study.xlsx` was also checked separately:
 it passed readiness and generated 97 result tables from a feasible CBC incumbent

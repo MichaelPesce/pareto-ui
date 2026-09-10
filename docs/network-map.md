@@ -56,7 +56,8 @@ npm --prefix electron/ui test -- --watchAll=false --runInBand
 ./electron/ui/node_modules/.bin/tsc --noEmit --project electron/ui/tsconfig.json
 ```
 
-For local integration checks, `map_testing/map_testing.kml` and
+For a fresh clone, use the [public practice maps](../examples/map-to-optimization/README.md)
+with the linked workflow guide. For existing local integration checks, `map_testing/map_testing.kml` and
 `map_testing/map_testing.zip` should import the same 17 nodes and 17 pipelines.
 These local fixtures are ignored by Git; automated regression tests generate their
 own small fixtures. Use a separate `PARETO_DATA_BASEDIR` and `PARETO_LOG_DIR` for

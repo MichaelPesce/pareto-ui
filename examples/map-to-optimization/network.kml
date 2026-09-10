@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>P1</name>
+      <Point>
+        <coordinates>-103,34,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>N1</name>
+      <Point>
+        <coordinates>-102.99,34,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>K1</name>
+      <Point>
+        <coordinates>-102.98,34,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>pipe</name>
+      <LineString>
+        <coordinates>-103,34,0 -102.99,34,0 -102.98,34,0</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>

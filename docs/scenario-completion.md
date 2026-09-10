@@ -4,6 +4,15 @@ A map supplies locations and connections; you add roles, forecasts, capacities, 
 costs. Start with **production pad → network node → disposal site**. Other facility
 types are optional. **No AI API key is required.**
 
+**Try it first:** the repository includes the same small network as a
+[KML](../examples/map-to-optimization/network.kml) and a
+[shapefile ZIP](../examples/map-to-optimization/network.zip), plus
+[completed Excel inputs](../examples/map-to-optimization/completed-inputs.xlsx)
+for comparison. On GitHub, use **Download raw file** to download each file.
+Follow the steps below using the practice values in step 3, or upload the completed
+workbook as a separate scenario and go to step 5. See the
+[example notes](../examples/map-to-optimization/README.md) for expected results.
+
 ## 1. Prepare and import your map
 
 Have PARETO UI and **CBC (Free)** available. For a source installation, follow
@@ -28,6 +37,9 @@ and save. Names such as `PP01` or `K01` do not assign types automatically.
 Assign the three roles above. Check each pipeline's connections, direction,
 diameter, and length. Every producing pad needs a directed route to a destination
 with available capacity; disconnected capacity cannot receive water.
+For the practice map, assign **P1 = Production Pad**, **N1 = Network Node**, and
+**K1 = Disposal Site**. Set the line diameter to **D4**, save, and check the
+connections run **P1 → N1 → K1**.
 Storage is an intermediate stop: the installed model requires it to end empty.
 Provide an onward route to disposal, completions demand, or beneficial reuse.
 Simply connecting an otherwise isolated branch to storage does not make it usable.
@@ -74,11 +86,26 @@ Use individual tables when different values are needed. Network connections and
 capacity shortfalls still require review. After saving, resolved table highlights
 clear automatically; remaining issues stay highlighted.
 
-**Practice example:** use `T01, T02`, production of 100 bbl/day in both periods,
-and 100 bbl/day for both pipes, the connecting node, and disposal. Use disposal
-availability 1, disposal cost 1 USD/bbl, and pipe operating cost 0.01 USD/bbl.
+**Practice values for the supplied map:**
+
+| Setting / table | Value |
+| --- | --- |
+| Planning periods | `T01, T02`; keep the default weekly periods and daily rate units. |
+| `PadRates` | P1 = **100 bbl/day** in both periods. |
+| `InitialPipelineCapacity` | P1 → N1 and N1 → K1 = **100 bbl/day** each. Set these after choosing D4; diameter supplies an initial suggestion. |
+| `NodeCapacities` | N1 = **100 bbl/day**. |
+| `InitialDisposalCapacity` | K1 = **100 bbl/day**. |
+| `DisposalOperatingCapacity` | K1 = **1** in both periods (100% available). |
+| `DisposalOperationalCost` | K1 = **1 USD/bbl**. |
+| `PipelineOperationalCost` | Both enabled pipes = **0.01 USD/bbl** each. |
+
 Retain generated distances, economics, and expansion options; leave other facility
-types absent.
+types absent. These are synthetic practice values, not estimates for a real site.
+For your own map, use measured or planned forecasts and infrastructure limits.
+Where branches merge, size the shared route for their **combined** flow in each
+period. Check disposal capacity after multiplying by its available fraction.
+Do not lower a real forecast just to make it fit a bottleneck; review capacity,
+eligible construction, or another destination.
 
 ## 4. Add inputs only for features you use
 
