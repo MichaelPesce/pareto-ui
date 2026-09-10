@@ -162,19 +162,19 @@ describe('scenario testing', () => {
         cy.findByRole('button', {name: /continue to optimization/i}).click()
         cy.screenshot(`optimization settings`)
         
-        // cy.findByRole('button', {name: /optimize/i}).click()
+        // Validation can take longer than the default command timeout on Windows.
+        // Match the canonical endpoint after FastAPI's trailing-slash redirect.
+        cy.intercept('POST', '**/run_model').as('startOptimization')
         cy.findAllByRole('button', {name: /optimize/i}).eq(0).click()
 
-        /*
-            wait for optimization to finish. times out after 4 minutes
-        */
-        cy.wait(2000)
-        cy.findByRole('heading', {name: /running optimization/i}).should('exist')
-        cy.findByRole('heading', {name: /running optimization/i, timeout: 1200000}).should('not.exist')
+        cy.wait('@startOptimization', {responseTimeout: 120000})
+            .its('response.statusCode').should('eq', 200)
+        // A fast solve may skip the loading screen. Require the actual results,
+        // retaining the existing 20-minute budget for the default 15-minute solve.
+        cy.contains(/recycling rate/i, {timeout: 1200000}).should('be.visible')
         cy.screenshot(`finished optimizing`)
         
         //validate results
-        cy.contains(/recycling rate/i).should('be.visible')
         cy.contains(/total disposal/i).should('be.visible')
         cy.contains(/sourced water/i).should('be.visible')
         cy.contains(/capex/i).should('be.visible')
