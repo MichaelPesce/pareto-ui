@@ -1,4 +1,5 @@
 import ConstraintDiagnostics from "./ConstraintDiagnostics";
+import OptimizationProgress from '../../components/OptimizationProgress/OptimizationProgress';
 import React from 'react';
 import {useEffect, useState, type ChangeEvent} from 'react';   
 import { Alert, Box, Grid, LinearProgress, Button } from '@mui/material';
@@ -772,15 +773,7 @@ const handleNewInfrastructureOverride = () => {
           {showResetOverrides()}
         </Box> 
         :
-        <Box style={{backgroundColor:'white'}} sx={{m:3, padding:2, boxShadow:3}}>
-          <h2>Running Optimization</h2>
-          <p>This process could take several minutes</p>
-          <Box sx={{display: 'flex', justifyContent: 'center'}}>
-          <LinearProgress style={{width:"50%"}}/>
-          </Box>
-          
-          <p>Status: <b>{props.scenario.results.status}</b></p>
-        </Box>
+        <OptimizationProgress status={props.scenario.results.status} />
         }
       </Grid>
       <Grid item xs={3}>

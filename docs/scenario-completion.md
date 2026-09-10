@@ -144,6 +144,11 @@ scaling, runtime, and gap defaults, then click **Optimize**. Changed settings ar
 checked again before the run; input edits refresh the checklist and invalidate
 earlier model and feasibility checks.
 
+**Model Results** opens immediately with **Preparing optimization**, followed by
+**Running optimization** and **Preparing results**. A preparation failure shows the
+failed stage so you can review inputs and settings. If the connection is interrupted,
+use **Retry start request** to reconnect to the same run without starting another solve.
+
 Open **Model Results → Generate Excel Report** when finished. A feasible result at
 the time limit is not a proven optimum. For failures, review the reported stage
 and inputs; allow more solver time when appropriate. Reload saved inputs after a

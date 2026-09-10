@@ -42,8 +42,7 @@ class OptimizationWorkflowTests(unittest.TestCase):
                             get_input_lists=Mock(return_value=([], [])), create_model=Mock(return_value=model),
                             solve_model=Mock(side_effect=RuntimeError('solver failed') if solve_fails else None, return_value=solver),
                             is_feasible=Mock(return_value=False),
-                            generate_report=Mock(side_effect=RuntimeError('report failed') if report_fails else None, return_value=(model, {}))), \
-                patch.object(self.runner.time, 'sleep'):
+                            generate_report=Mock(side_effect=RuntimeError('report failed') if report_fails else None, return_value=(model, {}))):
             self.runner.handle_run_strategic_model('input.xlsx', 'output.xlsx', 1,
                                                   prepare_config(scenario, expected_response='modelParameters'))
         return scenario, handler

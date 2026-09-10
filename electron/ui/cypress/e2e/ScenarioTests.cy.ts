@@ -162,11 +162,16 @@ describe('scenario testing', () => {
         cy.findByRole('button', {name: /continue to optimization/i}).click()
         cy.screenshot(`optimization settings`)
         
-        // Validation can take longer than the default command timeout on Windows.
-        // Match the canonical endpoint after FastAPI's trailing-slash redirect.
-        cy.intercept('POST', /\/run_model$/).as('startOptimization')
+        // Hold acknowledgement long enough to verify the immediate preparation view.
+        let acknowledged = false
+        cy.intercept('POST', /\/run_model$/, request => {
+            request.on('response', response => response.setDelay(3000))
+            request.on('after:response', () => { acknowledged = true })
+        }).as('startOptimization')
         cy.findAllByRole('button', {name: /optimize/i}).eq(0).click()
-
+        cy.contains('Preparing optimization').should('be.visible').then(() => {
+            expect(acknowledged).to.eq(false)
+        })
         cy.wait('@startOptimization', {responseTimeout: 120000})
             .its('response.statusCode').should('eq', 200)
         // A fast solve may skip the loading screen. Require the actual results,

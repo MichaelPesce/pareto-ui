@@ -23,7 +23,6 @@ export default function Bottombar(props) {
     const {
       scenario,
       backgroundTasks,
-      setDisableOptimize,
       handleUpdateExcel,
       setInputDataEdited,
       handleSelection,
@@ -88,24 +87,6 @@ export default function Bottombar(props) {
       }
 
     },[scenario?.override_values])
-
-    useEffect(() => {
-        /*
-            if the current scenario is already being optimized OR if there are multiple optimizations
-            currently running, then we disable the ability to optimize the current scenario
-        */
-       try{
-        let tasks = backgroundTasks
-        if ((tasks.length > 0) || (!["Draft", "failure", "Optimized", "Not Optimized", "Infeasible"].includes(status))) {
-            setDisableOptimize(true)
-        } else {
-            setDisableOptimize(false)
-        }
-       } catch(e){
-        console.error("unable to check for background tasks from bottom bar : ",e)
-       }
-        
-    },[props])
 
     useEffect(() => {
       setNewScenarioName('')

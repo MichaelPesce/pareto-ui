@@ -58,6 +58,20 @@ basic scenario before enabling them.
 
 ## Preservation and compatibility
 
+Optimization launch checks input rules and revisions, reserves the scenario, and
+captures its saved inputs, settings, and fixed decisions under the database lock.
+It acknowledges the request before workbook I/O or model construction. A synchronous
+Starlette background task runs in the thread pool, writes a private workbook, builds
+the model once, solves, and verifies/reports the result. The workbook and reservation
+are released on success or failure. Explicit validation and feasibility checks remain
+separate actions; preparation is not evidence that a feasible solution exists.
+
+The frontend opens preparation immediately and polls active scenarios every two
+seconds. Launch failures retain prior results; accepted runs report their actual
+preparation, solve, or report failure stage. A client-generated run ID makes retrying
+a lost acknowledgement idempotent for the scenario's current run. Pending responses
+update their own scenario without changing the user's selection.
+
 Saved tables, sets, units, settings, and fixed decisions define the input revision.
 Map edits preserve table-owned forecasts, costs, expansion options, trucking values,
 and treatment stream classifications by identifier rather than row position.

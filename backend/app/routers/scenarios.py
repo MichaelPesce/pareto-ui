@@ -13,7 +13,8 @@
 import io
 import os
 import tempfile
-import shutil
+from copy import deepcopy
+from uuid import uuid4
 from pathlib import Path
 import aiofiles
 from fastapi import Body, Request, APIRouter, HTTPException, File, UploadFile, BackgroundTasks
@@ -32,7 +33,6 @@ from app.internal.ShapefileParser import extract_shp_paths, parseShapefiles
 from app.internal.util import time_it
 from app.internal.util import prepare_config
 from app.internal.input_schema import input_revision
-from app.internal.scenario_inputs import write_inputs
 from app.internal.scenario_validation import validate_inputs
 from app.internal.ai_configuration import ai_configuration as cborg
 
@@ -74,8 +74,6 @@ async def get_scenario(scenario_id: str):
     """
     Get basic information about all saved scenarios.
     """
-    print(f"get scenario")
-    print(f"id is: {scenario_id}, {type(scenario_id)}")
     return scenario_handler.retrieve_scenario(scenario_id)
 
 @router.get("/validate_scenario/{scenario_id}")
@@ -328,36 +326,39 @@ async def run_model(request: Request, background_tasks: BackgroundTasks):
     with scenario_handler._db_lock:
         supplied = data['scenario']
         scenario_id = int(supplied['id'])
-        scenario_handler.ensure_editable(scenario_id)
         scenario = scenario_handler.get_scenario(scenario_id)
+        # A lost acknowledgement can be retried without launching a second solve.
+        if data.get('run_id') and scenario.get('results', {}).get('run_id') == data['run_id']:
+            return scenario
+        scenario_handler.ensure_editable(scenario_id)
         if supplied.get('input_revision') and supplied['input_revision'] != scenario['input_revision']:
             raise HTTPException(409, detail='Inputs changed. Refresh the scenario before running optimization.')
-        # Settings may have just been changed on the setup screen. Persist them with
-        # the authoritative saved tables before validation and snapshot creation.
+        # Check current saved tables and capture settings while reserving the run.
+        # Workbook I/O and model construction belong to the synchronous background
+        # worker, which Starlette runs in its thread pool after sending the response.
         scenario['optimization'] = supplied.get('optimization', scenario['optimization'])
         scenario['override_values'] = supplied.get('override_values', scenario.get('override_values', {}))
+        validation = validate_inputs(scenario)
+        scenario['validation'] = validation
         scenario = scenario_handler.update_scenario(scenario)
-        validation = scenario_handler.validate__pareto_scenario(scenario_id)
         if not validation.get('valid'):
             raise HTTPException(422, detail={'message': 'Review the scenario inputs before optimization.', 'validation': validation})
         model_parameters = prepare_config(scenario, 'modelParameters')
-        directory = tempfile.mkdtemp(prefix='optimization-', dir=scenario_handler.excelsheets_path)
-        snapshot = str(Path(directory) / 'inputs.xlsx')
+        snapshot = deepcopy(scenario['data_input'])
+        overrides = deepcopy(scenario.get('override_values', {}))
+        scenario_handler.add_background_task(scenario_id)
         try:
-            write_inputs(scenario['data_input'], snapshot)
-            scenario_handler.add_background_task(scenario_id)
             if scenario.get('aiDiagnosis'):
                 scenario['previousAIDiagnosis'] = scenario_handler._mark_diagnosis_outdated(scenario['aiDiagnosis'])
                 scenario.pop('aiDiagnosis', None)
-            scenario['results'] = {'data': {}, 'status': 'Initializing', 'input_revision': input_revision(scenario)}
+            scenario['results'] = {'data': {}, 'status': 'Preparing inputs',
+                'input_revision': input_revision(scenario), 'run_id': data.get('run_id') or uuid4().hex}
             scenario = scenario_handler.update_scenario(scenario)
-            background_tasks.add_task(handle_run_strategic_model, input_file=snapshot,
+            background_tasks.add_task(handle_run_strategic_model, input_file=None, input_data=snapshot,
                 output_file=scenario_handler.get_excel_output_path(scenario_id), id=scenario_id,
-                modelParameters=model_parameters, overrideValues=scenario.get('override_values', {}))
-            background_tasks.add_task(shutil.rmtree, directory, ignore_errors=True)
+                modelParameters=model_parameters, overrideValues=overrides)
             return scenario
         except Exception:
-            shutil.rmtree(directory, ignore_errors=True)
             scenario_handler.remove_background_task(scenario_id)
             raise
 

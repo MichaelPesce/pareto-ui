@@ -1,13 +1,16 @@
 """Acceptance checks use isolated storage and the real model/report pipeline."""
 from copy import deepcopy
+import asyncio
 import importlib
 import os
 from pathlib import Path
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pyomo.environ import SolverFactory
 from scenario_fixtures import simple_scenario, map_files
@@ -123,12 +126,15 @@ class ScenarioApiTests(unittest.TestCase):
             self.assertEqual(self.client.post('/advance_to_optimization_setup/1').status_code, 200)
             current = self.handler.get_scenario(1)
             current['optimization']['runtime'] = 20
-            response = self.client.post('/run_model', json={'scenario': current})
+            with patch.object(self.runner, 'create_model', wraps=self.runner.create_model) as build:
+                response = self.client.post('/run_model', json={'scenario': current, 'run_id': 'real-solve'})
+            build.assert_called_once()
             self.assertEqual(response.status_code, 200, response.text)
         result = self.handler.get_scenario(1)
         self.assertEqual(result['results']['status'], 'Optimized', result['results'].get('error'))
         self.assertEqual(result['results']['solution_status'], 'optimal')
         self.assertEqual(result['results']['input_revision'], result['input_revision'])
+        self.assertEqual(result['results']['run_id'], 'real-solve')
         self.assertGreater(len(result['results']['data']), 50)
         report = self.client.get('/generate_report/1')
         self.assertEqual(report.status_code, 200)
@@ -139,11 +145,89 @@ class ScenarioApiTests(unittest.TestCase):
     def test_run_endpoint_rechecks_changed_settings(self):
         self.client.get('/validate_scenario/1')
         current = self.handler.get_scenario(1)
+        current['results'] = {'status': 'Optimized', 'data': {'previous': [[123]]}}
+        self.handler.update_scenario(current)
         current['optimization']['waterQuality'] = 'discrete'
         response = self.client.post('/run_model', json={'scenario': current})
         self.assertEqual(response.status_code, 422, response.text)
         self.assertTrue(any(issue['table'] == 'PadWaterQuality' for issue in response.json()['detail']['validation']['issues']))
         self.assertEqual(self.handler.get_background_tasks(), [])
+        self.assertEqual(self.handler.get_scenario(1)['results'], current['results'])
+
+    def test_launch_acknowledges_before_preparation_and_reserves_an_immutable_snapshot(self):
+        supplied = deepcopy(self.example)
+        async def payload():
+            return {'scenario': supplied, 'run_id': 'launch-1'}
+        tasks = BackgroundTasks()
+        with patch.object(self.runner, 'write_inputs') as write, patch.object(self.runner, 'create_model') as build, \
+                patch.object(self.handler, 'validate__pareto_scenario') as validate_model:
+            accepted = asyncio.run(self.routes.run_model(SimpleNamespace(json=payload), tasks))
+            write.assert_not_called()
+            build.assert_not_called()
+            validate_model.assert_not_called()
+        self.assertEqual(accepted['results']['status'], 'Preparing inputs')
+        self.assertEqual(self.handler.get_background_tasks(), [1])
+        self.assertEqual(len(tasks.tasks), 1)
+        captured = deepcopy(tasks.tasks[0].kwargs)
+        supplied['data_input']['df_parameters']['PadRates']['T01'] = [999]
+        supplied['optimization']['runtime'] = 999
+        supplied['override_values'] = {'changed': {}}
+        accepted['data_input']['df_parameters']['PadRates']['T02'] = [999]
+        self.assertEqual(tasks.tasks[0].kwargs, captured)
+
+        # Retry a lost acknowledgement with the same identity, without a second task.
+        repeated_tasks = BackgroundTasks()
+        repeated = asyncio.run(self.routes.run_model(SimpleNamespace(json=payload), repeated_tasks))
+        self.assertEqual(repeated['results']['run_id'], 'launch-1')
+        self.assertFalse(repeated_tasks.tasks)
+        async def duplicate():
+            return {'scenario': self.example, 'run_id': 'different-launch'}
+        with self.assertRaises(HTTPException) as error:
+            asyncio.run(self.routes.run_model(SimpleNamespace(json=duplicate), BackgroundTasks()))
+        self.assertEqual(error.exception.status_code, 409)
+
+    def test_preparation_runs_outside_the_event_loop_and_database_lock(self):
+        entered, release = threading.Event(), threading.Event()
+        def slow_write(*args):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError('Test preparation timed out')
+            raise RuntimeError('Stop before solving')
+        async def exercise():
+            async def payload():
+                return {'scenario': self.example}
+            tasks = BackgroundTasks()
+            await self.routes.run_model(SimpleNamespace(json=payload), tasks)
+            worker = asyncio.create_task(tasks())
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+                current = await asyncio.wait_for(self.routes.get_scenario('1'), 1)
+                active = await asyncio.wait_for(self.routes.check_tasks(), 1)
+                self.assertEqual(current['results']['status'], 'Preparing inputs')
+                self.assertEqual(active, {'tasks': [1]})
+                self.assertFalse(release.is_set())
+            finally:
+                release.set()
+                await worker
+        with patch.object(self.runner, 'write_inputs', side_effect=slow_write):
+            asyncio.run(exercise())
+        self.assertEqual(self.handler.get_background_tasks(), [])
+
+    def test_preparation_failures_record_the_stage_and_release_snapshot_and_reservation(self):
+        for function, stage in [('write_inputs', 'Preparing inputs'), ('create_model', 'Building model')]:
+            with self.subTest(stage=stage), patch.object(self.runner, function, side_effect=RuntimeError('Cannot prepare these inputs')):
+                current = self.handler.get_scenario(1)
+                response = self.client.post('/run_model', json={'scenario': current, 'run_id': function})
+            self.assertEqual(response.status_code, 200, response.text)
+            failed = self.handler.get_scenario(1)
+            self.assertEqual(failed['results']['status'], 'failure')
+            self.assertEqual(failed['results']['failure_stage'], stage)
+            self.assertEqual(failed['results']['run_id'], function)
+            self.assertEqual(failed['results']['error'], 'Cannot prepare these inputs')
+            self.assertEqual(self.handler.get_background_tasks(), [])
+            self.assertFalse(list(self.handler.excelsheets_path.glob('optimization-*')))
+            if stage == 'Building model':
+                self.assertEqual(failed['validation']['model_check'], 'failed')
 
     def test_explicit_facility_rename_preserves_forecasts_and_connections(self):
         scenario = deepcopy(self.example)

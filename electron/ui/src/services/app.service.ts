@@ -75,7 +75,7 @@ export const fetchExcelFile = (backend_port: number, filename: string) => {
 }; 
 
 export const runModel = (backend_port: number, data: any) => {
-    return fetch(BACKEND_URL+':'+backend_port+'/run_model/', {
+    return fetch(BACKEND_URL+':'+backend_port+'/run_model', {
         method: 'POST', 
         mode: 'cors',
         body: JSON.stringify(data)
@@ -96,6 +96,9 @@ export const copyScenario = (backend_port: number, id: number | string, newScena
         mode: 'cors'
     });
 };
+
+export const fetchScenario = (backend_port: number, id: string | number) =>
+    fetch(`${BACKEND_URL}:${backend_port}/get_scenario/${id}`);
 
 export const uploadScenario = (backend_port: number, data: any, name: string, defaultNodeType: string) => {
     let endpoint = BACKEND_URL+':'+backend_port+'/upload/'+name

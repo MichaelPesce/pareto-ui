@@ -479,7 +479,6 @@ export interface OptimizationProps {
   scenario: Scenario;
   updateScenario: (updatedScenario: any, setScenarioData?: boolean, propagateChanges?: string) => void;
   disabled: boolean;
-  setDisabled: (disabled: boolean) => void;
   handleRunModel: () => void;
   backgroundTasks: any[];
   category?: string;

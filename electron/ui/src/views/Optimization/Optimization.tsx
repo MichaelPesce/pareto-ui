@@ -105,11 +105,6 @@ export default function Optimization(props: OptimizationProps) {
      }
    }
 
-  const handleOptimize = () => {
-   props.setDisabled(true)
-   props.handleRunModel()
-  }
-
   return ( 
     <Grid container spacing={2} style={styles.gridContainer}>
       <Grid item xs={2.5}>
@@ -329,4 +324,3 @@ export default function Optimization(props: OptimizationProps) {
   );
 
 }
-

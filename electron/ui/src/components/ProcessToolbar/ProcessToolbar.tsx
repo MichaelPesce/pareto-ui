@@ -79,7 +79,7 @@ export default function ProcessToolbar(props) {
         <p style={selected === 1 ? styles.textSelected : styles.textUnselected}>Optimization Setup</p>
       </Grid>
       <Grid item xs={1.8}>
-        <IconButton aria-label="results" sx={{marginTop:'5px'}} disabled={scenario ? (scenario.results.status !== "Draft" && scenario.results.status !== "Incomplete") ? false : true : true} style={selected === 2 ? styles.iconSelected : null} onClick={() => handleClick(2)}>
+        <IconButton aria-label="results" sx={{marginTop:'5px'}} disabled={!props.hasOptimizationStart && (!scenario || ['Draft', 'Incomplete'].includes(scenario.results.status))} style={selected === 2 ? styles.iconSelected : null} onClick={() => handleClick(2)}>
             <PieChartIcon fontSize="large"></PieChartIcon>
         </IconButton>
         <p style={selected === 2 ? styles.textSelected : styles.textUnselected}>Model Results</p>
@@ -109,5 +109,4 @@ export default function ProcessToolbar(props) {
   );
 
 }
-
 
