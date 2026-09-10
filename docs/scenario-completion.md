@@ -28,6 +28,9 @@ and save. Names such as `PP01` or `K01` do not assign types automatically.
 Assign the three roles above. Check each pipeline's connections, direction,
 diameter, and length. Every producing pad needs a directed route to a destination
 with available capacity; disconnected capacity cannot receive water.
+Storage is an intermediate stop: the installed model requires it to end empty.
+Provide an onward route to disposal, completions demand, or beneficial reuse.
+Simply connecting an otherwise isolated branch to storage does not make it usable.
 
 The current model requires some positive production or flowback during the horizon.
 
@@ -99,6 +102,9 @@ See the [feature requirements reference](map-to-optimization-assessment.md#how-r
 Choose **Validate Scenario**, resolve blockers, and review warnings about defaults.
 A model that builds is not yet proven feasible. Choose **Check feasibility** for a
 separate check that does not allow unmet water requirements.
+For example, a 50,000 bbl/day production forecast cannot pass through a network
+node limited to 1,000 bbl/day, even if disposal elsewhere has enough capacity.
+Autofill checks individual values; matching rates, routes and capacities still matters.
 
 - **Feasible plan found:** continue to **Advance to Optimization Setup**.
 - **Infeasible:** check directions, bottlenecks, forecasts, storage balances, and fixed decisions.

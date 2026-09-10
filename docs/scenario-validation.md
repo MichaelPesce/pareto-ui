@@ -23,9 +23,22 @@ quality, hydraulics, desalination, or subsurface formulations.
 For production/pipeline/disposal networks, a directed capacity calculation can
 identify bottlenecks even when total disposal capacity is sufficient. It accounts
 for existing pipes, eligible expansion, node limits, and operating availability.
-Networks with storage, treatment, trucking, external water, or completions use the
-full model for feasibility; the static screen does not approximate their temporal
-balances. The parent model's sorted-period/storage screening limitations remain.
+For more complex networks, the screen treats storage, treatment, completions and
+reuse as unlimited destinations and trucking as unlimited transport, and ignores
+additional flowback/external supply. A bottleneck even under these optimistic
+assumptions is a blocker; passing does not establish feasibility or account for
+inventory/demand balances. Ordinary storage must have an onward route because
+final inventory is fixed at zero. Potential evaporation via connected CB-EV
+treatment is left to the full model. The parent model's sorted-period/storage
+screening limitations remain.
+
+Solution verification uses an absolute tolerance of `1e-6` plus a relative
+tolerance of `1e-7` against evaluated linear-term magnitudes, accounting for CBC's
+rounded text output (including cost equalities whose bound is zero). Used-variable
+bounds and discrete decisions are checked separately; missing values fail
+verification. Diagnostic scans without solver verification retain their strict
+absolute tolerance. This avoids rejecting a multi-billion-dollar solution for
+sub-dollar-to-hundreds-of-dollars rounding while still detecting flow shortfalls.
 
 Optional facilities have conditional input rules. Advanced modes remain available
 with additional data checks and model construction; comprehensive guidance and

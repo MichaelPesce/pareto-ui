@@ -79,3 +79,14 @@ class ScenarioFillTests(unittest.TestCase):
         filled, preview = prepare_fill(scenario, 'network', 1)
         self.assertEqual(preview['cell_count'], 0)
         self.assertEqual(filled, scenario)
+
+    def test_storage_initial_level_can_be_filled_when_the_old_template_omits_it(self):
+        scenario = deepcopy(self.example)
+        data = scenario['data_input']
+        data['df_sets']['StorageSites'] = ['S1']
+        data['df_parameters']['InitialStorageCapacity'] = {'StorageSites': ['S1'], 'VALUE': [10000]}
+        filled, _ = prepare_fill(scenario, 'capacity', 0)
+        table = filled['data_input']['df_parameters']['InitialStorageLevel']
+        self.assertEqual(table, {'StorageSites': ['S1'], 'VALUE': [0]})
+        write_inputs(filled['data_input'], self.path)
+        self.assertEqual(read_inputs(self.path)['df_parameters']['InitialStorageLevel'], table)

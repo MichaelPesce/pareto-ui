@@ -5,7 +5,7 @@ from functools import lru_cache
 import math
 
 from .input_schema import FORECASTS, dimension_count, input_revision
-from .scenario_validation import SECTION_NAMES, numeric, validate_inputs
+from .scenario_validation import REQUIREMENTS, SECTION_NAMES, numeric, validate_inputs
 
 
 @lru_cache(maxsize=1)
@@ -32,6 +32,12 @@ def set_cell(tables, table, keys, value, periods):
     columns = tables.get(table)
     if not columns:
         headers = ([FORECASTS[table][0], *periods] if table in FORECASTS else template_headers().get(table, []))
+        # Older bundled workbooks omit some supported scalar inputs, including
+        # InitialStorageLevel. The requirement defines their index explicitly.
+        if not headers:
+            requirement = next((item for item in REQUIREMENTS if item.table == table), None)
+            if requirement:
+                headers = [requirement.node_set, 'VALUE']
         # Empty matrix templates contain only their index headings.
         if headers and headers[-1].lower() != 'value' and len(headers) < len(keys):
             headers = [*headers, keys[-1]]

@@ -1,11 +1,11 @@
 """Actionable explanations of the network checks used by scenario readiness."""
 
-DESTINATIONS = 'a disposal site, storage site, completions pad, or beneficial reuse site'
+DESTINATIONS = 'a disposal site, completions pad, or beneficial reuse site'
 
 
 def network_help(code, table, row, sets):
     node = str(row[0]) if row else 'the facility'
-    if code == 'unreachable_destination':
+    if code in ('unreachable_destination', 'storage_only_destination'):
         role = 'production pad' if node in sets.get('ProductionPads', []) else 'completions pad with flowback'
         forecast = 'PadRates' if node in sets.get('ProductionPads', []) else 'FlowbackRates'
         return {
@@ -15,6 +15,7 @@ def network_help(code, table, row, sets):
                 'Select the connecting pipeline and check its ordered nodes and the flow arrows between them. Add a missing connection or change the arrows so water can leave the pad and continue all the way to a destination. For example: production pad → network node → disposal site.',
                 'For trucking, enable a supported origin-to-destination route in its trucking connection table (tables ending in T). A drawn line or a nearby site alone does not establish an enabled route.',
                 'Treatment, including desalination, is an intermediate step for this check: continue the path to a destination. Save the network, then review destination capacity, demand or availability for each period and run Validate Scenario.',
+                'Storage must be empty at the end of the horizon. A storage-only route cannot absorb ongoing production: provide an outlet to a final destination, or connect the producing branch to disposal. The installed model only permits storage evaporation with connected CB-EV treatment; its amount and timing still require a feasibility check.',
             ],
         }
     explanations = {
@@ -23,7 +24,7 @@ def network_help(code, table, row, sets):
             ['Select the source on the network and set Node Type to Production Pad or Completions Pad as appropriate.',
              'Set planning periods, then enter the actual PadRates or FlowbackRates forecast, with at least one positive value. Connect the source to a destination.']),
         'missing_destination': (
-            f'Produced water needs a destination: {DESTINATIONS}. Treatment alone does not satisfy this route check.',
+            f'Produced water needs a destination: {DESTINATIONS}. Treatment or ordinary storage alone does not satisfy this route check.',
             ['Select the intended destination in the network and correct its Node Type, or add the missing facility.',
              'Connect the producing pads to it in the direction of flow. Enter its capacity and any applicable demand or availability forecasts.']),
         'duplicate_identifier': (
@@ -51,7 +52,7 @@ def network_help(code, table, row, sets):
             [f'Decide how residual water from {node} is handled. If it remains in the modeled network, add a supported outgoing treatment route and mark its connection cell 2 for residual water.',
              'Continue that route to a suitable destination and provide capacity and operating inputs. If residuals leave the modeled system, review and accept that boundary assumption.']),
         'network_capacity': (
-            'For this production/pipeline/disposal network, connected capacity must carry the produced water in every period, including eligible expansion and disposal operating fractions.',
+            'Connected capacity must carry the produced water in every period. This screen includes eligible pipeline/disposal expansion and disposal operating fractions. Storage, treatment, completions, reuse and trucking are treated as unrestricted, so a detected bottleneck remains a blocker even with those optimistic assumptions.',
             [f'Open the highlighted {table} cell and review the bottleneck, then follow the route through the network.',
              'Check InitialPipelineCapacity, InitialDisposalCapacity, DisposalOperatingCapacity and enabled NodeCapacities. Increase capacity only where physically justified, provide eligible expansion options, or add another usable route.',
              'Check the production forecast and units. Save changes and run Validate Scenario and Check feasibility; passing this capacity screen alone does not prove the full model is feasible.']),

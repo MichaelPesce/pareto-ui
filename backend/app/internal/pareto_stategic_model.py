@@ -27,7 +27,7 @@ from pareto.strategic_water_management.strategic_produced_water_optimization imp
     DesalinationModel
 )
 from pyomo.opt import TerminationCondition
-from pareto.utilities.results import generate_report, OutputUnits, is_feasible, nostdout
+from pareto.utilities.results import generate_report, OutputUnits, nostdout
 from pareto.utilities.model_modifications import fix_vars
 
 from app.internal.get_data import get_input_lists, get_data
@@ -35,7 +35,8 @@ from app.internal.scenario_handler import (
     scenario_handler,
 )
 
-from app.internal.model_diagnostics import scan_constraint_violations, unavailable_constraint_scan
+from app.internal.model_diagnostics import (scan_constraint_violations, unavailable_constraint_scan,
+                                            solution_is_feasible as is_feasible, SOLUTION_RELATIVE_TOLERANCE)
 from app.internal.model_compatibility import prepare_model_for_ui
 
 _log = logging.getLogger(__name__)
@@ -126,12 +127,13 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
     constraint_violations = scan_constraint_violations(
         strategic_model,
         solution_state="solver_solution" if termination_condition == TerminationCondition.optimal else "current_model_values",
+        relative_tol=SOLUTION_RELATIVE_TOLERANCE,
     )
     scenario = scenario_handler.get_scenario(int(id))
     scenario["results"].update(terminationCondition=str(termination_condition), constraints_violations=constraint_violations)
     scenario_handler.update_scenario(scenario)
     with nostdout():
-        feasibility_status = is_feasible(strategic_model)
+        feasibility_status = is_feasible(strategic_model, scan=constraint_violations)
         _log.info(f"feasibility status is: {feasibility_status}")
 
     if not feasibility_status:

@@ -124,6 +124,43 @@ class ScenarioValidationTests(unittest.TestCase):
         self.assertEqual(issue['expected'], 100)
         self.assertEqual(result['feasibility'], 'not_run')
 
+    def test_storage_only_route_and_upstream_node_bottleneck_are_both_reported(self):
+        scenario = deepcopy(self.example)
+        data = scenario['data_input']
+        data['df_sets']['StorageSites'] = ['S1']
+        tables = data['df_parameters']
+        tables['InitialStorageCapacity'] = {'StorageSites': ['S1'], 'VALUE': [10000]}
+        tables['NKA'] = {}
+        tables['NSA'] = {'NetworkNodes': ['N1'], 'S1': [1]}
+        tables['InitialPipelineCapacity']['S1'] = [100] * len(tables['InitialPipelineCapacity']['NODES'])
+        tables['NodeCapacities'] = {'NetworkNodes': ['N1'], 'VALUE': [50]}
+        result = validate_inputs(scenario)
+        issue = next(i for i in result['issues'] if i['code'] == 'storage_only_destination')
+        self.assertEqual(issue['row'], ['P1'])
+        self.assertIn('Storage must end empty', issue['message'])
+        bottleneck = next(i for i in result['issues'] if i['code'] == 'network_capacity')
+        self.assertEqual(bottleneck['table'], 'NodeCapacities')
+        self.assertEqual(bottleneck['row'], ['N1'])
+        self.assertEqual(bottleneck['actual'], 50)
+        # Storage can be an intermediate facility, and a trucking alternative
+        # must prevent a false pipeline/node-capacity blocker.
+        tables['SKA'] = {'StorageSites': ['S1'], 'K1': [1]}
+        tables['PKT'] = {'ProductionPads': ['P1'], 'K1': [1]}
+        result = validate_inputs(scenario)
+        self.assertFalse(any(i['code'] in ('storage_only_destination', 'network_capacity') for i in result['issues']))
+
+    def test_connected_evaporation_treatment_is_not_rejected_as_a_storage_dead_end(self):
+        scenario = deepcopy(self.example)
+        data = scenario['data_input']
+        data['df_sets']['StorageSites'] = ['S1']
+        data['df_sets']['TreatmentSites'] = ['R1']
+        data['df_sets']['TreatmentTechnologies'] = ['CB-EV']
+        tables = data['df_parameters']
+        tables['NKA'] = {}
+        tables['NRA'] = {'NetworkNodes': ['N1'], 'R1': [1]}
+        tables['RSA'] = {'TreatmentSites': ['R1'], 'S1': [1]}
+        self.assertFalse(any(i['code'] in ('storage_only_destination', 'unreachable_destination') for i in validate_inputs(scenario)['issues']))
+
     def test_solver_check_distinguishes_feasible_and_infeasible(self):
         with patch.dict(os.environ, {'PATH': str(Path.home() / '.idaes/bin') + os.pathsep + os.environ['PATH']}):
             if not SolverFactory('cbc').available(False):

@@ -4,9 +4,14 @@ import json
 import logging
 import math
 
-from pyomo.environ import Constraint, value
+from pyomo.environ import Constraint, Objective, Var, value
+from pyomo.core.expr.visitor import identify_variables
+from pyomo.repn import generate_standard_repn
 
 _log = logging.getLogger(__name__)
+# CBC writes roughly eight significant digits in its text solution. Compare
+# residuals to the magnitudes of the terms, including equalities with bound 0.
+SOLUTION_RELATIVE_TOLERANCE = 1e-7
 DIAGNOSTIC_LIMITATION = (
     "Constraint residuals describe current model values, which may be initial values after an "
     "infeasible or interrupted solve. They do not identify a proven set of conflicting constraints. "
@@ -24,9 +29,11 @@ def unavailable_constraint_scan(reason="No model values are available."):
     }
 
 
-def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="current_model_values"):
+def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="current_model_values", relative_tol=0):
     summary = unavailable_constraint_scan()
     summary.update(tolerance=tol, solution_state=solution_state)
+    if relative_tol:
+        summary['relative_tolerance'] = relative_tol
     top = []
     try:
         for con in model.component_data_objects(Constraint, active=True, descend_into=True):
@@ -43,8 +50,17 @@ def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="
                 gap = max(lower_gap, upper_gap)
                 if not math.isfinite(gap):
                     raise ValueError("Nonfinite residual")
+                allowed = tol
+                if relative_tol and gap > tol:
+                    scale = max(abs(body), abs(lower or 0), abs(upper or 0))
+                    repn = generate_standard_repn(con.body, compute_values=True, quadratic=False)
+                    if repn.is_linear():
+                        scale = max(scale, abs(repn.constant or 0),
+                                    sum(abs(coef * value(var)) for coef, var in zip(repn.linear_coefs, repn.linear_vars)))
+                    # Nonlinear expressions retain the stricter bound/body check.
+                    allowed += relative_tol * scale
                 summary["evaluated_count"] += 1
-                if gap <= tol:
+                if gap <= allowed:
                     continue
                 summary["count"] += 1
                 record = {
@@ -74,6 +90,36 @@ def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="
     _log.info("Constraint scan: %s violations, %s evaluated, %s skipped",
               summary["count"], summary["evaluated_count"], summary["skipped_count"])
     return summary
+
+
+def solution_is_feasible(model, scan=None, tol=1e-6, relative_tol=SOLUTION_RELATIVE_TOLERANCE):
+    """Verify active constraints, used-variable bounds, and discrete decisions.
+
+    Unused free variables need not be returned by the solver. Fixed variables
+    and variables referenced by an active constraint/objective must be valid.
+    """
+    scan = scan if scan is not None else scan_constraint_violations(model, tol=tol, relative_tol=relative_tol)
+    if scan['status'] != 'complete' or scan['count']:
+        return False
+    required = {}
+    for kind in (Constraint, Objective):
+        for component in model.component_data_objects(kind, active=True, descend_into=True):
+            expression = component.body if kind is Constraint else component.expr
+            required.update((id(var), var) for var in identify_variables(expression, include_fixed=True))
+    required.update((id(var), var) for var in model.component_data_objects(Var, descend_into=True) if var.fixed)
+    for var in required.values():
+        number = value(var, exception=False)
+        if number is None or not math.isfinite(number):
+            return False
+        for bound, sign in ((var.lb, -1), (var.ub, 1)):
+            if bound is not None:
+                if not math.isfinite(bound) or sign * (number - bound) > tol + relative_tol * max(abs(number), abs(bound)):
+                    return False
+        if var.is_binary() and min(abs(number), abs(number - 1)) > tol:
+            return False
+        if var.is_integer() and abs(number - round(number)) > tol:
+            return False
+    return True
 
 
 def _preview(data, depth=0):

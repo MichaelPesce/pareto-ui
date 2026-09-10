@@ -13,7 +13,7 @@ from .input_schema import NODE_SETS, OPTION_SETS, FORECASTS, flat_table, dimensi
 from .util import prepare_config
 from .validation_help import network_help
 
-CATALOG_VERSION = 2
+CATALOG_VERSION = 3
 MODEL_LOCK = threading.Lock()
 ARC_SETS = dict(zip('PCNKSRFO', ('ProductionPads', 'CompletionsPads', 'NetworkNodes', 'SWDSites',
                                  'StorageSites', 'TreatmentSites', 'ExternalWaterSources', 'ReuseOptions')))
@@ -230,7 +230,11 @@ def validate_inputs(scenario, *, fill_targets=None):
             require('PipelineDiameterValues', (diameter,), 'capacity')
             if config['pipeline_capacity'] == 'input':
                 require('PipelineCapacityIncrements', (diameter,), 'capacity')
-    sinks = set(n for s in ('CompletionsPads', 'SWDSites', 'StorageSites', 'ReuseOptions') for n in sets.get(s, []))
+    sinks = set(n for s in ('CompletionsPads', 'SWDSites', 'ReuseOptions') for n in sets.get(s, []))
+    # The installed model fixes final storage inventory to zero. Evaporation is
+    # possible only with a CB-EV treatment option and a treatment-to-storage pipe.
+    evaporation_storage = {b for a, b, table in edges if table == 'RSA'} if 'CB-EV' in sets.get('TreatmentTechnologies', []) else set()
+    sinks.update(evaporation_storage)
     for node in (*sets.get('ProductionPads', []), *sets.get('CompletionsPads', [])):
         supply = sum(numeric(v) or 0 for table in ('PadRates', 'FlowbackRates') for key, v in flat.get(table, {}).items() if key[0] == node)
         if supply <= 0:
@@ -242,18 +246,23 @@ def validate_inputs(scenario, *, fill_targets=None):
                 seen.add(current)
                 pending.extend(adjacency[current] - seen)
         if not (seen - {node}) & sinks:
-            issue('unreachable_destination', 'network', f'{node} produces water but has no directed route to a destination. Review the connections and flow directions.', row=(node,))
+            storage = sorted(seen & set(sets.get('StorageSites', [])))
+            if storage:
+                issue('storage_only_destination', 'network',
+                      f'{node} can reach storage ({", ".join(storage)}) but no final destination. Storage must end empty; add an onward route to disposal, completions demand or beneficial reuse.', row=(node,))
+            else:
+                issue('unreachable_destination', 'network', f'{node} produces water but has no directed route to a destination. Review the connections and flow directions.', row=(node,))
     for site in sets.get('TreatmentSites', []):
         streams = {numeric(flat[t].get((a, b))) for a, b, t in edges if a == site}
         if 2 not in streams:
             issue('residual_boundary', 'capacity', f'{site} has no residual-water route. The parent model omits that stream balance; review whether residual water should leave the modeled network.', severity='warning', row=(site,))
 
-    if config['pipeline_capacity'] == 'input' and not any(counts[(section, 'error')] for section in ('network', 'forecasts', 'capacity')):
+    if config['pipeline_capacity'] == 'input' and not any(counts[(section, 'error')] for section in ('forecasts', 'capacity')):
         from .network_capacity import capacity_issues
         for finding in capacity_issues(sets, flat, edges, config['node_capacity']):
             table, row = finding['cut'][0] if finding['cut'] else ('InitialDisposalCapacity', ())
             issue('network_capacity', 'capacity',
-                  f"{finding['period']}: production is {finding['required']:g} {rate_unit}, but the connected network can deliver at most {finding['capacity']:g} {rate_unit} to disposal, including eligible expansion. Review capacity or another route.",
+                  f"{finding['period']}: production is {finding['required']:g} {rate_unit}, but the connected network can deliver at most {finding['capacity']:g} {rate_unit} to {'destinations, even treating storage, treatment, completions and reuse as unrestricted' if finding['relaxed'] else 'disposal'}, including eligible expansion. Review {table} ({' / '.join(row)}) or another route.",
                   table, row, finding['period'], actual=finding['capacity'], expected=finding['required'])
 
     # Additional configurations remain available; their inputs are checked before
@@ -301,7 +310,7 @@ def check_model(scenario, path, result, solve=False):
     from pareto.utilities.model_modifications import fix_vars
     from pyomo.environ import Objective, value, TransformationFactory
     from pyomo.opt import TerminationCondition
-    from .model_diagnostics import scan_constraint_violations
+    from .model_diagnostics import scan_constraint_violations, solution_is_feasible, SOLUTION_RELATIVE_TOLERANCE
     result = deepcopy(result)
     if not MODEL_LOCK.acquire(blocking=False):
         return {**result, 'valid': False, 'state': 'not_determined', 'error': 'Another model check is running. Try again after it finishes.'}
@@ -337,8 +346,8 @@ def check_model(scenario, path, result, solve=False):
             return {**result, 'valid': False, 'state': 'infeasible', 'feasibility': 'infeasible'}
         if len(solved.solution):
             scaled.solutions.load_from(solved)
-            scan = scan_constraint_violations(scaled)
-            if scan['status'] == 'complete' and scan['count'] == 0:
+            scan = scan_constraint_violations(scaled, relative_tol=SOLUTION_RELATIVE_TOLERANCE)
+            if solution_is_feasible(scaled, scan=scan):
                 return {**result, 'state': 'feasible', 'feasibility': 'feasible', 'slacks_disabled': True}
         return {**result, 'state': 'not_determined', 'feasibility': 'not_determined',
                 'error': 'No verified feasible plan was found within the check budget. This is not proof of infeasibility.'}
