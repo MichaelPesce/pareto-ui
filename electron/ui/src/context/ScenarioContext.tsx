@@ -38,7 +38,6 @@ export interface ScenarioContextValue {
   scenarioIndex: string | number | null;
   backgroundTasks: Array<string | number>;
   loadLandingPage: number;
-  checkModelResults: number;
   showCompletedOptimization: boolean;
   lastCompletedScenario: string | number | null;
   compareScenarioIndexes: Array<string | number>;
@@ -186,7 +185,6 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     setBackgroundTasks(tasks);
   };
   const [loadLandingPage, setLoadLandingPage] = useState<number>(1);
-  const [checkModelResults, setCheckModelResults] = useState<number>(0);
   const [showCompletedOptimization, setShowCompletedOptimization] = useState<boolean>(false);
   const [lastCompletedScenario, setLastCompletedScenario] = useState<string | number | null>(null);
   const [compareScenarioIndexes, setCompareScenarioIndexes] = useState<Array<string | number>>([]);
@@ -518,7 +516,8 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
           if (!response.ok) throw new Error('Unable to check optimization status.');
           const current = await response.json();
           if (stopped) return;
-          acceptSavedScenario(current);
+          // An unchanged poll must not reload maps or reset their local view state.
+          if (JSON.stringify(savedScenarios.current[String(id)]) !== JSON.stringify(current)) acceptSavedScenario(current);
           if (COMPLETED_STATES.includes(current.results.status)) {
             completed.push(id);
             setLastCompletedScenario(id);
@@ -527,7 +526,6 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
         } catch (error) { console.error('Unable to check optimization status; retrying.', error); }
       }));
       if (stopped) return;
-      setCheckModelResults(count => count + 1);
       if (completed.length) {
         try {
           const response = await checkTasks(port);
@@ -556,7 +554,6 @@ export const ScenarioProvider: React.FC<ScenarioProviderProps> = ({ children, na
     scenarioIndex,
     backgroundTasks,
     loadLandingPage,
-    checkModelResults,
     showCompletedOptimization,
     lastCompletedScenario,
     compareScenarioIndexes,

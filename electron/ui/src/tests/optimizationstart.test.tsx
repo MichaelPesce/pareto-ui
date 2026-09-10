@@ -181,3 +181,20 @@ test('polling recovers after a transient error and publishes results without ove
     expect(context.showCompletedOptimization).toBe(true);
   } finally { consoleError.mockRestore(); jest.useRealTimers(); }
 });
+
+test('unchanged status polls preserve scenario identity so maps do not reload', async () => {
+  jest.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByText('Optimize setup'));
+    await acknowledge();
+    const previous = context.scenarioData;
+    const calls = (fetchScenario as jest.Mock).mock.calls.length;
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(fetchScenario).toHaveBeenCalledTimes(calls + 1);
+    expect(context.scenarioData).toBe(previous);
+    database[1].results.status = 'Solving model';
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(context.scenarioData.results.status).toBe('Solving model');
+    expect(context.scenarioData).not.toBe(previous);
+  } finally { jest.useRealTimers(); }
+});
