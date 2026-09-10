@@ -32,15 +32,16 @@ final inventory is fixed at zero. Potential evaporation via connected CB-EV
 treatment is left to the full model. The parent model's sorted-period/storage
 screening limitations remain.
 
-Solution verification uses an absolute tolerance of `1e-6` plus a relative
-tolerance of `1e-7` against evaluated linear-term magnitudes, accounting for CBC's
-rounded text output (including cost equalities whose bound is zero). Used-variable
-bounds and discrete decisions are checked separately; missing values fail
-verification. Diagnostic scans without solver verification retain their strict
-absolute tolerance. This accommodates rounded large cost totals. A remaining
-review issue is that large coefficients in physical constraints can also inflate
-the relative allowance and hide smaller flow residuals; the tolerance needs a
-narrower scope before treating this verification as reliable for those cases.
+Solution verification uses an absolute tolerance of `1e-6`. Only **linear
+equalities with currency units** receive an additional relative tolerance of
+`1e-7` against evaluated term magnitudes, accounting for CBC's rounded cost totals
+(including equalities whose bound is zero). Physical constraints, inequalities,
+nonlinear equations, and variable bounds retain the absolute tolerance. Missing
+or inconsistent units never grant a larger allowance. Discrete decisions and
+missing values are checked separately. Diagnostic scans without solver
+verification also retain the absolute tolerance. This preserves checks on flow
+and capacity even when large coefficients cancel, while accommodating rounded
+large monetary totals.
 
 Optional facilities have conditional input rules. Advanced modes remain available
 with additional data checks and model construction; comprehensive guidance and
@@ -60,9 +61,11 @@ Exports use the saved workbook. Validation and optimization use temporary input
 snapshots from the same canonical data. Input changes refresh deterministic issues
 and table highlights while invalidating old model/feasibility evidence. The backend
 rejects stale supplied revisions and edits during optimization. The UI disables
-optimization while saves are pending and provides an error/reload action on
-failure. Rapid settings edits still need a fix to preserve newer local changes
-when earlier save responses arrive.
+optimization while saves are pending or a save has failed. Queued edits are
+applied to the latest saved scenario; earlier responses retain newer local edits
+and server-generated data. Settings, table edits, and renames use the same queue.
+A failed save retains the draft and stops subsequent saves for that scenario
+until the user chooses **Reload saved inputs**, which discards unsaved changes.
 
 Section autofill derives eligible missing/invalid numeric cells from the same
 requirements, independently of the 250 displayed-issue limit. Preview lists counts
@@ -102,10 +105,16 @@ explicitly if the solver is unavailable. Test databases are temporary.
 
 The [public practice files](../examples/map-to-optimization/README.md) provide a
 small manual acceptance case available in a fresh clone. Both map formats and the
-completed workbook have been verified through the backend with CBC. The
-[Windows CI run for PR #112](https://github.com/project-pareto/pareto-ui/actions/runs/34480658345/job/102882317587)
-exposed open workbook handles during atomic replacement;
-explicitly closing readers before replacement remains a release blocker.
+completed workbook have been verified through the backend with CBC. Workbook
+readers close explicitly on success and failure, before atomic replacement.
+Regressions retain references to those readers and check that their file handles
+are closed, so garbage collection cannot mask Windows file-lock problems.
+
+The parent dependency is pinned in [requirements.txt](../backend/requirements.txt).
+When upgrading it, rerun the backend suite on Linux and Windows, the frontend
+save-ordering tests, and both public map examples. A large-cost scenario was also
+rechecked: its physical constraints pass, and only monetary accounting residuals
+need the relative allowance.
 
 The local `map_testing/strategic_toy_case_study.xlsx` was also checked separately:
 it passed readiness and generated 97 result tables from a feasible CBC incumbent

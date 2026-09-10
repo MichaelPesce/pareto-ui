@@ -147,7 +147,9 @@ earlier model and feasibility checks.
 Open **Model Results → Generate Excel Report** when finished. A feasible result at
 the time limit is not a proven optimum. For failures, review the reported stage
 and inputs; allow more solver time when appropriate. Reload saved inputs after a
-stale-save error. Wait for optimization to finish before editing.
+stale-save error; **Reload saved inputs** discards unsaved edits. A failed save
+blocks further saves and optimization until you reload. Wait for optimization to
+finish before editing.
 
 For map-editing details, see [Network map editing](network-map.md). Technical
 validation and preservation notes are [documented separately](scenario-validation.md).

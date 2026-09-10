@@ -25,5 +25,5 @@ sniffio==1.2.0
 tinydb==4.7.1
 typing_extensions==4.15.0
 uvicorn==0.17.6
-## Install project pareto WITHOUT tensor flow - currently only in my fork
-git+https://github.com/MichaelPesce/project-pareto.git@remove-tensorflow
+## Tested Project PARETO 1.2.dev0 revision without TensorFlow; upgrade with workflow regression checks.
+git+https://github.com/MichaelPesce/project-pareto.git@df03357884ebd5a76ba47e6831a8deffdd2d9515
