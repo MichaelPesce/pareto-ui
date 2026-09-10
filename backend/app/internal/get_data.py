@@ -11,6 +11,7 @@
 # publicly and display publicly, and to permit other to do so.
 #####################################################################################################
 
+import logging
 import warnings
 import pandas as pd
 import numpy as np
@@ -24,10 +25,35 @@ from pareto.utilities.get_data import (
     parameter_tabs_all_models,
     get_valid_input_set_tab_names,
     get_valid_input_parameter_tab_names,
-    _sheets_to_dfs,
+    DataLoadingError,
     _cleanup_data,
     _df_to_param
 )
+
+_log = logging.getLogger(__name__)
+
+
+def _sheets_to_dfs(src, raises=True, **kwargs):
+    """Keep the parent's sheet fallback behavior while closing its Excel reader.
+
+    The pinned parent's helper leaves readers open, including on failed sheets.
+    Windows cannot replace or remove those workbooks until every reader closes.
+    """
+    tables, failed = {}, {}
+    with pd.ExcelFile(src) as workbook:
+        for sheet_name in workbook.sheet_names:
+            try:
+                tables[sheet_name] = workbook.parse(sheet_name=sheet_name, **kwargs).squeeze("columns")
+            except Exception as error:
+                _log.warning("Loading failed for sheet %r: %r", sheet_name, error)
+                failed[sheet_name] = error
+                tables[sheet_name] = pd.DataFrame()
+    if failed:
+        error = DataLoadingError(failed)
+        if raises:
+            raise error
+        warnings.warn(error.summary + "\nFor these sheets, an empty dataframe is used as fallback.\n")
+    return tables
 
 
 
@@ -76,8 +102,8 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     # Check all names available in the input sheet
     # If the sheet name is unused (not a valid Set or Parameter tab, not "Overview", and not "Schematic"), raise a warning.
     unused_tab_list = []
-    df = pd.ExcelFile(_fname)
-    sheet_list = df.sheet_names
+    with pd.ExcelFile(_fname) as workbook:
+        sheet_list = workbook.sheet_names
     for name in sheet_list:
         if (
             name not in valid_set_tab_names

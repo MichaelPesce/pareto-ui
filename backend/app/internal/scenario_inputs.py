@@ -145,6 +145,7 @@ def write_inputs(data, path, template=None):
         os.close(fd)
         try:
             wb.save(temp)
+            wb.close()
             os.replace(temp, path)
         finally:
             if os.path.exists(temp):
