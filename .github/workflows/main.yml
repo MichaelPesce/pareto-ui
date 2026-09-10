@@ -36,6 +36,9 @@ jobs:
           environment-file: environment.yml
           miniforge-version: latest
           activate-environment: pareto-ui-env
+          # Hosted runners are discarded; the environment is removed below.
+          # Avoid a second, slow deletion of Conda's shared package cache on Windows.
+          run-post: false
 
       - name: Install python packages
         run: pip install -r backend/requirements.txt
