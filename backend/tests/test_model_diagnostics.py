@@ -1,10 +1,17 @@
 import json
 import unittest
-from pyomo.environ import Binary, ConcreteModel, Constraint, Var
+from pyomo.environ import Binary, ConcreteModel, Constraint, Var, units as pyunits
 from app.internal.model_diagnostics import scan_constraint_violations, build_diagnosis_context, solution_is_feasible
 
 
 class DiagnosticTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            pyunits.USD
+        except AttributeError:
+            pyunits.load_definitions_from_strings(['USD = [currency]'])
+
     def test_only_active_constraints_are_counted_and_results_are_bounded(self):
         model = ConcreteModel()
         model.x = Var(initialize=0)
@@ -55,8 +62,8 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_rounded_large_totals_do_not_hide_real_flow_violations(self):
         model = ConcreteModel()
-        model.cost = Var(initialize=1_000_000_000.4)
-        model.cost_balance = Constraint(expr=model.cost == 1_000_000_000)
+        model.cost = Var(initialize=1_000_000_000.4, units=pyunits.USD)
+        model.cost_balance = Constraint(expr=model.cost == 1_000_000_000 * pyunits.USD)
         model.flow = Var(initialize=350)
         model.supply = Constraint(expr=model.flow == 350)
         self.assertEqual(scan_constraint_violations(model)['count'], 1)
@@ -86,13 +93,47 @@ class DiagnosticTests(unittest.TestCase):
     def test_relative_check_handles_cancellation_and_scaled_equalities(self):
         for scale in (1, 0.001):
             model = ConcreteModel()
-            model.total = Var(initialize=scale * 10_000_000.4)
-            model.a = Var(initialize=scale * 6_000_000)
-            model.b = Var(initialize=scale * 4_000_000)
+            model.total = Var(initialize=scale * 10_000_000.4, units=pyunits.kUSD)
+            model.a = Var(initialize=scale * 6_000_000, units=pyunits.kUSD)
+            model.b = Var(initialize=scale * 4_000_000, units=pyunits.kUSD)
             model.c = Constraint(expr=model.total == model.a + model.b)
             self.assertTrue(solution_is_feasible(model))
             model.total.set_value(scale * 10_000_010)
             self.assertFalse(solution_is_feasible(model))
+
+    def test_big_m_cancellation_cannot_hide_a_physical_violation(self):
+        for units in (pyunits.dimensionless, pyunits.m**3 / pyunits.s):
+            for scale in (1, .001):
+                for equality in (False, True):
+                    with self.subTest(units=str(units), scale=scale, equality=equality):
+                        model = ConcreteModel()
+                        model.flow = Var(initialize=.005 * scale, bounds=(0, None), units=units)
+                        model.closed = Var(domain=Binary, initialize=1)
+                        limit = scale * 99999 * (1 - model.closed) * units
+                        model.route = Constraint(expr=model.flow == limit if equality else model.flow <= limit)
+                        self.assertFalse(solution_is_feasible(model))
+                        model.flow.set_value(0)
+                        self.assertTrue(solution_is_feasible(model))
+
+    def test_large_physical_balances_and_variable_bounds_remain_strict(self):
+        model = ConcreteModel()
+        model.flow = Var(initialize=1_000_000_000.005, bounds=(0, 1_000_000_000), units=pyunits.m**3)
+        model.balance = Constraint(expr=model.flow == 1_000_000_000 * pyunits.m**3)
+        self.assertFalse(solution_is_feasible(model))
+        model.balance.set_value(model.flow >= 0 * pyunits.m**3)
+        self.assertFalse(solution_is_feasible(model))
+        model.flow.set_value(1_000_000_000)
+        self.assertTrue(solution_is_feasible(model))
+
+    def test_currency_budget_limits_and_nonlinear_equations_remain_strict(self):
+        model = ConcreteModel()
+        model.cost = Var(initialize=1_000_000_000.4, units=pyunits.USD)
+        model.budget = Constraint(expr=model.cost <= 1_000_000_000 * pyunits.USD)
+        self.assertFalse(solution_is_feasible(model))
+        model.budget.deactivate()
+        model.factor = Var(initialize=1)
+        model.nonlinear = Constraint(expr=model.cost * model.factor == 1_000_000_000 * pyunits.USD)
+        self.assertFalse(solution_is_feasible(model))
 
 
 if __name__ == '__main__':

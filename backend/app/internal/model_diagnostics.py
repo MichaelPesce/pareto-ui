@@ -4,13 +4,14 @@ import json
 import logging
 import math
 
-from pyomo.environ import Constraint, Objective, Var, value
+from pyomo.environ import Constraint, Objective, Var, value, units as pyunits
 from pyomo.core.expr.visitor import identify_variables
 from pyomo.repn import generate_standard_repn
 
 _log = logging.getLogger(__name__)
-# CBC writes roughly eight significant digits in its text solution. Compare
-# residuals to the magnitudes of the terms, including equalities with bound 0.
+# CBC rounds large accounting totals in its text solution. Relative tolerance
+# applies only to linear currency equalities, never to physical constraints,
+# inequalities (including budget limits), or variable bounds.
 SOLUTION_RELATIVE_TOLERANCE = 1e-7
 DIAGNOSTIC_LIMITATION = (
     "Constraint residuals describe current model values, which may be initial values after an "
@@ -29,11 +30,23 @@ def unavailable_constraint_scan(reason="No model values are available."):
     }
 
 
+def _is_currency_equality(constraint):
+    if not constraint.equality:
+        return False
+    try:
+        pyunits.convert_value(1, from_units=pyunits.get_units(constraint.body), to_units=pyunits.USD)
+        return True
+    except Exception:
+        # Missing or inconsistent unit metadata never grants a looser tolerance.
+        return False
+
+
 def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="current_model_values", relative_tol=0):
     summary = unavailable_constraint_scan()
     summary.update(tolerance=tol, solution_state=solution_state)
     if relative_tol:
         summary['relative_tolerance'] = relative_tol
+        summary['relative_tolerance_scope'] = 'linear_currency_equalities'
     top = []
     try:
         for con in model.component_data_objects(Constraint, active=True, descend_into=True):
@@ -51,14 +64,12 @@ def scan_constraint_violations(model, tol=1e-6, max_results=25, solution_state="
                 if not math.isfinite(gap):
                     raise ValueError("Nonfinite residual")
                 allowed = tol
-                if relative_tol and gap > tol:
-                    scale = max(abs(body), abs(lower or 0), abs(upper or 0))
+                if relative_tol and gap > tol and _is_currency_equality(con):
                     repn = generate_standard_repn(con.body, compute_values=True, quadratic=False)
                     if repn.is_linear():
-                        scale = max(scale, abs(repn.constant or 0),
+                        scale = max(abs(body), abs(lower or 0), abs(upper or 0), abs(repn.constant or 0),
                                     sum(abs(coef * value(var)) for coef, var in zip(repn.linear_coefs, repn.linear_vars)))
-                    # Nonlinear expressions retain the stricter bound/body check.
-                    allowed += relative_tol * scale
+                        allowed += relative_tol * scale
                 summary["evaluated_count"] += 1
                 if gap <= allowed:
                     continue
@@ -113,7 +124,7 @@ def solution_is_feasible(model, scan=None, tol=1e-6, relative_tol=SOLUTION_RELAT
             return False
         for bound, sign in ((var.lb, -1), (var.ub, 1)):
             if bound is not None:
-                if not math.isfinite(bound) or sign * (number - bound) > tol + relative_tol * max(abs(number), abs(bound)):
+                if not math.isfinite(bound) or sign * (number - bound) > tol:
                     return False
         if var.is_binary() and min(abs(number), abs(number - 1)) > tol:
             return False
