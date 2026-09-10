@@ -311,6 +311,7 @@ def check_model(scenario, path, result, solve=False):
     from pyomo.environ import Objective, value, TransformationFactory
     from pyomo.opt import TerminationCondition
     from .model_diagnostics import scan_constraint_violations, solution_is_feasible, SOLUTION_RELATIVE_TOLERANCE
+    from .solvers import solver_name
     result = deepcopy(result)
     if not MODEL_LOCK.acquire(blocking=False):
         return {**result, 'valid': False, 'state': 'not_determined', 'error': 'Another model check is running. Try again after it finishes.'}
@@ -338,7 +339,7 @@ def check_model(scenario, path, result, solve=False):
         for objective in scaled.component_objects(Objective, active=True):
             objective.deactivate()
         scaled.feasibility_objective = Objective(expr=0)
-        solver = get_solver(options['solver'] or 'cbc')
+        solver = get_solver(solver_name(options['solver'] or 'cbc'))
         set_timeout(solver, timeout_s=20)
         solved = solver.solve(scaled, load_solutions=False)
         result['termination_condition'] = str(solved.solver.termination_condition)

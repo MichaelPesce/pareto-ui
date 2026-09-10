@@ -9,7 +9,7 @@ from pyomo.core.expr.visitor import identify_variables
 from pyomo.repn import generate_standard_repn
 
 _log = logging.getLogger(__name__)
-# CBC rounds large accounting totals in its text solution. Relative tolerance
+# Large accounting totals can accumulate floating-point rounding. Relative tolerance
 # applies only to linear currency equalities, never to physical constraints,
 # inequalities (including budget limits), or variable bounds.
 SOLUTION_RELATIVE_TOLERANCE = 1e-7

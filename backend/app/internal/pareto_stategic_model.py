@@ -38,6 +38,7 @@ from app.internal.scenario_handler import (
 from app.internal.model_diagnostics import (scan_constraint_violations, unavailable_constraint_scan,
                                             solution_is_feasible as is_feasible, SOLUTION_RELATIVE_TOLERANCE)
 from app.internal.model_compatibility import prepare_model_for_ui
+from app.internal.solvers import solver_name
 
 _log = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
     if options["solver"] not in ["cbc", "gurobi", "gurobi_direct"]:
         _log.info('deleting solver as it doesnt match any of the proper solver names')
         del options["solver"]
+    else:
+        options['solver'] = solver_name(options['solver'])
 
     _log.info(f"solving model with options: {options}")
 

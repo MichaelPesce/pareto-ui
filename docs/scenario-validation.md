@@ -32,9 +32,17 @@ final inventory is fixed at zero. Potential evaporation via connected CB-EV
 treatment is left to the full model. The parent model's sorted-period/storage
 screening limitations remain.
 
+CBC uses its NL/ASL interface to retain full-precision solution values; the default
+LP text output rounds values enough to create apparent flow-balance violations.
+Both optimization and feasibility checks use this interface. Use the CBC build
+provided by IDAES extensions, which includes ASL support.
+CBC 2.10 can return an empty result marked optimal for an infeasible integer model.
+In that case, the app checks the LP interface within the remaining time budget;
+an empty result alone is never treated as proof of feasibility or infeasibility.
+
 Solution verification uses an absolute tolerance of `1e-6`. Only **linear
 equalities with currency units** receive an additional relative tolerance of
-`1e-7` against evaluated term magnitudes, accounting for CBC's rounded cost totals
+`1e-7` against evaluated term magnitudes, accounting for rounding in large cost totals
 (including equalities whose bound is zero). Physical constraints, inequalities,
 nonlinear equations, and variable bounds retain the absolute tolerance. Missing
 or inconsistent units never grant a larger allowance. Discrete decisions and
@@ -112,9 +120,10 @@ are closed, so garbage collection cannot mask Windows file-lock problems.
 
 The parent dependency is pinned in [requirements.txt](../backend/requirements.txt).
 When upgrading it, rerun the backend suite on Linux and Windows, the frontend
-save-ordering tests, and both public map examples. A large-cost scenario was also
-rechecked: its physical constraints pass, and only monetary accounting residuals
-need the relative allowance.
+save-ordering tests, and both public map examples. Regressions also solve fractional
+flows through CBC's full-precision interface. The workshop example used by the
+browser suite was rechecked: all 2,539 constraints pass the strict scan and the
+optimum generates 97 result tables.
 
 The local `map_testing/strategic_toy_case_study.xlsx` was also checked separately:
 it passed readiness and generated 97 result tables from a feasible CBC incumbent
