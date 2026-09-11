@@ -44,11 +44,11 @@ class OpenAIClientWrapper:
         if api_key is None:
             api_key = os.environ.get("CBORG_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
-        self.api_key = api_key
+        self.api_key = api_key.strip() if api_key else None
         self.base_url = base_url
         self.client = None
-        if api_key is not None:
-            client_kwargs = {"api_key": api_key}
+        if self.api_key:
+            client_kwargs = {"api_key": self.api_key}
             if base_url:
                 client_kwargs["base_url"] = base_url
             self.client = openai.OpenAI(**client_kwargs)
@@ -89,12 +89,15 @@ class OpenAIClientWrapper:
         """Change the model to use for subsequent calls."""
         self.model = model_name
 
-    def set_api_key(self, api_key: str, base_url: Optional[str] = None) -> None:
+    def set_api_key(self, api_key: Optional[str], base_url: Optional[str] = None) -> None:
         """Change API key (reinitializes underlying client)."""
-        self.api_key = api_key
+        self.api_key = api_key.strip() if api_key else None
         if base_url is not None:
             self.base_url = base_url
-        kwargs = {"api_key": api_key}
+        if not self.api_key:
+            self.client = None
+            return
+        kwargs = {"api_key": self.api_key}
         if self.base_url:
             kwargs["base_url"] = self.base_url
         self.client = openai.OpenAI(**kwargs)

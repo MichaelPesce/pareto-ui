@@ -1,6 +1,8 @@
+import ConstraintDiagnostics from "./ConstraintDiagnostics";
+import OptimizationProgress from '../../components/OptimizationProgress/OptimizationProgress';
 import React from 'react';
 import {useEffect, useState, type ChangeEvent} from 'react';   
-import { Box, Grid, LinearProgress, Button } from '@mui/material';
+import { Alert, Box, Grid, LinearProgress, Button } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SankeyPlot from './SankeyPlot';
 import KPIDashboard from './KPIDashboard';
@@ -34,6 +36,7 @@ export default function ModelResults(props: ModelResultsProps): JSX.Element {
   const ERROR_PREVIEW_END = 1000;
   const { port } = useApp()
   const {
+    isAvailable: isAIAvailable,
     status: aiStatus,
     requestKind,
     diagnosis,
@@ -107,7 +110,10 @@ export default function ModelResults(props: ModelResultsProps): JSX.Element {
 
   const isDiagnosingError = aiStatus === "running" && requestKind === "optimization-diagnosis";
   const [ diagnosisSyncedAt, setDiagnosisSyncedAt ] = useState<string | null>(null)
-  const rawFailureMessage = props.scenario.results.error || "Optimization failed without a reported error message.";
+  const rawFailureMessage = props.scenario.results.error
+    || (props.scenario.results.status === "Infeasible"
+      ? "Optimization terminated as infeasible."
+      : "Optimization failed without a reported error message.");
   const shouldCondenseFailureMessage = rawFailureMessage.length > ERROR_PREVIEW_START + ERROR_PREVIEW_END;
   const displayedFailureMessage = shouldCondenseFailureMessage && !showFullError
     ? `${rawFailureMessage.slice(0, ERROR_PREVIEW_START)}\n\n... [${rawFailureMessage.length - (ERROR_PREVIEW_START + ERROR_PREVIEW_END)} characters omitted] ...\n\n${rawFailureMessage.slice(-ERROR_PREVIEW_END)}`
@@ -120,7 +126,9 @@ export default function ModelResults(props: ModelResultsProps): JSX.Element {
       ? savedDiagnosis
       : null;
   const hasDiagnosis = Boolean(displayedDiagnosis);
-
+  const constraintViolations = props.scenario.results.constraints_violations;
+  const isInfeasibleStatus = props.scenario.results.status === "Infeasible";
+  const shouldShowDiagnosisPanel = props.scenario.results.status === "failure" || isInfeasibleStatus;
   const handleDiagnoseError = async () => {
     await runOptimizationDiagnosis(props.scenario.id, rawFailureMessage);
   }
@@ -521,6 +529,8 @@ const handleNewInfrastructureOverride = () => {
   
   return ( 
     <Box sx={{pb: 12}}>
+    {props.scenario.results.solution_status === 'feasible' && <Alert severity="warning" sx={{mx: 3, mb: 2}}>A feasible solution was found. The solver stopped before proving optimality.</Alert>}
+    {props.scenario.results.status === 'failure' && props.scenario.results.failure_stage && <Alert severity="error" sx={{mx: 3, mb: 2}}>The run failed during {props.scenario.results.failure_stage.toLowerCase()}.</Alert>}
     {/*
       if a scenario has been optimized, show outputs
       otherwise, display the status of the optimization
@@ -561,11 +571,11 @@ const handleNewInfrastructureOverride = () => {
 
       </Grid>
       <Grid item xs={6} style={{alignContent:"center", alignItems:"center", justifyContent:"center"}}>
-        {props.scenario.results.status === "failure" ? 
+        {shouldShowDiagnosisPanel ?
         <Box style={{backgroundColor:'white'}} sx={{m:3, padding:2, boxShadow:3}}>
           <Box sx={{display: "flex", alignItems: "center", gap: 1, mb: 1}}>
             <ErrorOutlineIcon sx={{color: "#b42318"}} />
-            <h2 style={{margin: 0}}>Optimization Failed</h2>
+            <h2 style={{margin: 0}}>{isInfeasibleStatus ? "Optimization Infeasible" : "Optimization Failed"}</h2>
           </Box>
             <Box
             sx={{
@@ -608,9 +618,13 @@ const handleNewInfrastructureOverride = () => {
               </Box>
             )}
           </Box>
+          <ConstraintDiagnostics summary={constraintViolations} />
+          {isAIAvailable && <>
           <Box sx={{display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, flexWrap: "wrap"}}>
             <p style={{margin: 0, color: "#51606d"}}>
-              Ask AI to review the failure in the context of this scenario and suggest in-app changes to try next.
+              {isInfeasibleStatus
+                ? "Ask AI to review the infeasibility in the context of this scenario and suggest in-app changes to try next."
+                : "Ask AI to review the failure in the context of this scenario and suggest in-app changes to try next."}
             </p>
             <Button
               variant="outlined"
@@ -619,7 +633,11 @@ const handleNewInfrastructureOverride = () => {
               disabled={isDiagnosingError}
               onClick={handleDiagnoseError}
             >
-              {isDiagnosingError ? "Diagnosing..." : "Diagnose Error with AI"}
+              {isDiagnosingError
+                ? "Diagnosing..."
+                : isInfeasibleStatus
+                  ? "Diagnose Infeasibility with AI"
+                  : "Diagnose Error with AI"}
             </Button>
           </Box>
           {isDiagnosingError && (
@@ -739,6 +757,7 @@ const handleNewInfrastructureOverride = () => {
               )}
             </Box>
           )}
+          </>}
         </Box> 
         : 
         props.scenario.results.status.includes("Optimized") ?
@@ -754,15 +773,7 @@ const handleNewInfrastructureOverride = () => {
           {showResetOverrides()}
         </Box> 
         :
-        <Box style={{backgroundColor:'white'}} sx={{m:3, padding:2, boxShadow:3}}>
-          <h2>Running Optimization</h2>
-          <p>This process could take several minutes</p>
-          <Box sx={{display: 'flex', justifyContent: 'center'}}>
-          <LinearProgress style={{width:"50%"}}/>
-          </Box>
-          
-          <p>Status: <b>{props.scenario.results.status}</b></p>
-        </Box>
+        <OptimizationProgress status={props.scenario.results.status} />
         }
       </Grid>
       <Grid item xs={3}>

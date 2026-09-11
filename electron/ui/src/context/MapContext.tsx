@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from "react";
-import { reverseMapCoordinates, convertMapDataToBackendFormat, generateNewName, calculatePipelineSegmentLengths } from "../util";
+import { reverseMapCoordinates, convertMapDataToBackendFormat, generateNewName, reconcilePipelineSegmentLengths, reconcilePipelineOutgoingNodes, getAllowedPipelineConnectionCandidates } from "../util";
 import { useApp } from '../AppContext';
+import { useScenario } from './ScenarioContext';
 import { uploadAdditionalMap } from "../services/app.service";
 import type { Scenario } from "../types";
 import type { CoordinateTuple, MapEditorNode, SelectedNodeState, MapContextValue, MapProviderProps } from "../types";
@@ -11,6 +12,7 @@ const MapContext = createContext<MapContextValue | undefined>(undefined);
 // Provider component
 export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, handleUpdateScenario }) => {
     const { port } = useApp();
+    const { acceptSavedScenario } = useScenario();
     const [ lineData, setLineData ] = useState<MapEditorNode[]>([]);
     const [ nodeData, setNodeData ] = useState<MapEditorNode[]>([]);
     const [networkMapData, setNetworkMapData] = useState<any>([]);
@@ -91,8 +93,11 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
             if (!data) return data;
             const prev = { ...data.node } as MapEditorNode;
             const prevNodes = prev.nodes || [];
-            const updatedNodeList = [...prevNodes, { name: newConnectingNode.name, coordinates: newConnectingNode.coordinates }]
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const updatedNodeList = reconcilePipelineOutgoingNodes(
+                [...prevNodes, { name: newConnectingNode.name, coordinates: newConnectingNode.coordinates }],
+                prevNodes, nodeData
+            );
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prev.lengths);
             const node = {
                 ...prev,
                 nodes: updatedNodeList,
@@ -110,12 +115,13 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
             if (!data) return data;
             const prev = { ...data.node } as MapEditorNode;
             const prevNodes = prev.nodes || [];
-            const updatedNodeList = prevNodes.map((existingNode, idx) =>
+            const nextNodes = prevNodes.map((existingNode, idx) =>
                 idx === connectionIdx
                     ? { ...existingNode, name: replacementNode.name, coordinates: replacementNode.coordinates }
                     : existingNode
             );
-            const lengths = calculatePipelineSegmentLengths(updatedNodeList);
+            const updatedNodeList = reconcilePipelineOutgoingNodes(nextNodes, prevNodes, nodeData);
+            const lengths = reconcilePipelineSegmentLengths(updatedNodeList, prevNodes, prev.lengths);
             const node = {
                 ...prev,
                 nodes: updatedNodeList,
@@ -130,6 +136,13 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
 
     const clickNode = (node: MapEditorNode, idx: number): void => {
         if (selectedNode?.node?.node_type === "path" && selectingPipelineConnectionFromMap) {
+            const pipelineNodes = selectedNode.node.nodes || [];
+            // Reuse the same candidate filter as the editor dropdowns so map picks and form picks behave identically.
+            const allowedCandidates = getAllowedPipelineConnectionCandidates(nodeData, pipelineNodes, pipelineConnectionSelectionIndex);
+            const canUseSelectedNode = allowedCandidates.some((candidate) => candidate.name === node.name);
+            if (!canUseSelectedNode) {
+                return;
+            }
             if (pipelineConnectionSelectionIndex === null) {
                 addPipelineConnection(node)
             } else {
@@ -204,6 +217,9 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
             }
         }
 
+        if (showNetworkNode && !creatingNewNode && selectedNode?.node.name !== updatedNode.name) {
+            updatedScenario.data_input.map_data._node_renames = {[selectedNode.node.name]: updatedNode.name};
+        }
         handleUpdateScenario(updatedScenario, false, "map")
         deselectActiveNode();
     }
@@ -251,7 +267,7 @@ export const MapProvider: React.FC<MapProviderProps> = ({ children, scenario, ha
         if (response.status === 200) {
             response.json()
             .then((data)=>{
-                handleUpdateScenario(data)
+                acceptSavedScenario(data)
             }).catch((err)=>{
                 console.error(String(err))
                 // setShowError(true)

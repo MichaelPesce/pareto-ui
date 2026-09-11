@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useMemo} from 'react';
+import React, {useState, useEffect, useMemo, useRef} from 'react';
 import { Box, Drawer, CssBaseline, Collapse, Tooltip, IconButton } from '@mui/material'
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
@@ -20,6 +20,7 @@ export default function Sidebar(props: SidebarProps) {
     scenario,
     section,
     category,
+    inputFocus,
     inputDataEdited,
     handleUpdateExcel,
     setInputDataEdited,
@@ -29,6 +30,8 @@ export default function Sidebar(props: SidebarProps) {
     selectedNode,
     showNetworkNode,
     showNetworkPipeline,
+    nodeData = [],
+    clickNode,
   } = useMapValues();
 
   const { id, data_input, optimization, results, optimized_override_values, validation } = scenario || {};
@@ -38,8 +41,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const isIncomplete = results?.status === "Incomplete";
   const hasMapData = data_input?.map_data;
-  const showMapEditor = category === "Network Diagram" && hasMapData;
-  const isMapEditorOpen = Boolean(isIncomplete && category === "Network Diagram");
+  const focusedIssue = useRef<typeof inputFocus>(null);
   const hasSelectedMapItem = Boolean(selectedNode && (showNetworkNode || showNetworkPipeline));
   const [ isMapEditorExpanded, setIsMapEditorExpanded ] = useState<boolean>(false);
   const activeDrawerWidth = isMapEditorExpanded ? expandedDrawerWidth : drawerWidth;
@@ -49,10 +51,15 @@ export default function Sidebar(props: SidebarProps) {
   const [ openStatic, setOpenStatic ] = useState<boolean>(false)
   const [ openResultsTables, setOpenResultsTables ] = useState<boolean>(false)
   const [ overrideList, setOverrideList ] = useState<string[]>([])
+  const isInputSection = section === 0;
+  const isOptimizationSettings = section === 1;
+  const isOutputSection = section === 2;
+  const showMapEditor = category === "Network Diagram" && hasMapData && isInputSection;
   const validationIssueTables = useMemo(() => {
     const missingTables = validation?.missing_tables || [];
     const tablesWithIssues = validation?.tables_with_issues || [];
-    return new Set<string>([...missingTables, ...tablesWithIssues]);
+    const issueTables = (validation?.issues || []).filter(issue => issue.severity === 'error' && issue.table).map(issue => issue.table as string);
+    return new Set<string>([...missingTables, ...tablesWithIssues, ...issueTables]);
   }, [validation]);
 
   useEffect(() => {
@@ -69,12 +76,17 @@ export default function Sidebar(props: SidebarProps) {
   },[scenario])
 
   useEffect(() => {
-    if (hasSelectedMapItem) {
-      setIsMapEditorExpanded(true);
-    } else {
-      setIsMapEditorExpanded(false);
+    setIsMapEditorExpanded(Boolean(showMapEditor && hasSelectedMapItem));
+  }, [showMapEditor, hasSelectedMapItem]);
+
+  useEffect(() => {
+    if (section !== 0 || !showMapEditor || !inputFocus || focusedIssue.current === inputFocus || inputFocus.area !== 'map') return;
+    const index = nodeData.findIndex(node => node.name === inputFocus.row?.[0]);
+    if (index >= 0) {
+      focusedIssue.current = inputFocus;
+      clickNode(nodeData[index], index);
     }
-  }, [isMapEditorOpen, hasSelectedMapItem]);
+  }, [section, showMapEditor, inputFocus, nodeData, clickNode]);
 
   const handleOpenSaveModal = () => setOpenSaveModal(true);
   const handleCloseSaveModal = () => setOpenSaveModal(false);
@@ -151,8 +163,8 @@ export default function Sidebar(props: SidebarProps) {
     },
   }
 
-  const handleSaveModal = () => {
-    handleUpdateExcel(id as string | number, String(category || ''), (data_input?.df_parameters || {})[category || ''])
+  const handleSaveModal = async () => {
+    if (await handleUpdateExcel?.(id as string | number, String(category || ''), (data_input?.df_parameters || {})[category || '']) === false) return;
     handleCloseSaveModal()
     setInputDataEdited?.(false)
     handleSetCategory(String(key || ''))
@@ -189,7 +201,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderMapOptions = () => {
-    const categories = {"Input Summary" :null, "Network Diagram": null}
+    const categories = {"Input Summary" :null, ...(isInputSection ? {"Complete Scenario Inputs": null} : {}), "Network Diagram": null}
     const inputSummaryLabel = isIncomplete ? "PARETO Input File" : "Input Summary";
     return (
       Object.entries(categories).map( ([k, value]) => ( 
@@ -203,7 +215,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderAdditionalCategories = () => {
-    const additionalCategories = section === 0 ? {"Input Summary" :null, "Network Diagram": null, "Plots": null} : section === 1 ? {} : {"Dashboard": null, "Sankey": null, "Network Diagram": null}
+    const additionalCategories = isInputSection ? {"Input Summary" :null, "Complete Scenario Inputs": null, "Network Diagram": null, "Plots": null} : isOptimizationSettings ? {} : {"Dashboard": null, "Sankey": null, "Network Diagram": null}
     return (
       Object.entries(additionalCategories).map( ([k, value]) => ( 
         <div style={String(category)===k ? styles.selected : styles.unselected} onClick={() => handleClick(k)} key={`${value}${k}`}> 
@@ -216,7 +228,7 @@ export default function Sidebar(props: SidebarProps) {
   }
 
   const renderTopLevelCategories = () => {
-    if (section === 0) {
+    if (isInputSection) {
       return (
         <div>
           <div style={getStyle("Dynamic")}  onClick={() => setOpenDynamic(!openDynamic)}> 
@@ -241,7 +253,7 @@ export default function Sidebar(props: SidebarProps) {
           {renderStaticCategories()}
         </div>
       ) 
-    }else if (section ===2) {
+    }else if (isOutputSection) {
       return (
         <>
         <div style={category==="Results Tables" ? styles.selected : styles.unselected} onClick={() => setOpenResultsTables(!openResultsTables)}> 
@@ -424,7 +436,7 @@ export default function Sidebar(props: SidebarProps) {
             }
             {
               scenario && hasMapData && (
-                 category === "Network Diagram" &&
+                 (category === "Network Diagram" && isInputSection) &&
                 <MapEditor 
                   isExpanded={isMapEditorExpanded}
                   PipelineDiameterValues={PipelineDiameterValues}

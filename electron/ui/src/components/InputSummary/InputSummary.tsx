@@ -9,6 +9,7 @@ import NetworkMap from '../NetworkMap/NetworkMap';
 import { FileUploader } from "react-drag-drop-files";
 import ErrorBar from '../ErrorBar/ErrorBar'
 import { useApp } from '../../AppContext';
+import { useScenario } from '../../context/ScenarioContext';
 
 export default function InputSummary(props: InputSummaryProps) {
     const [ tableType, setTableType ] = useState<string>("Input Summary")
@@ -18,6 +19,7 @@ export default function InputSummary(props: InputSummaryProps) {
     const [ errorMessage, setErrorMessage ] = useState<string>("")
     const fileTypes = ["xlsx"];
     const { port } = useApp()
+    const { acceptSavedScenario } = useScenario();
     const [ sumValues, setSumValues ] = useState<Array<{statistic:string; value:number; units:string}>>([
         {statistic: 'Total Completions Demand', value: 0, units: 'bbl'},
         {statistic: 'Total Produced Water', value: 0, units: 'bbl'},
@@ -202,7 +204,7 @@ export default function InputSummary(props: InputSummaryProps) {
             response.json()
             .then((data)=>{
                 console.log('fileupload successful: ',data)
-                props.updateScenario(data)
+                acceptSavedScenario(data)
             }).catch((err)=>{
                 console.error("error on file upload: ",err)
                 setErrorMessage(String(err))

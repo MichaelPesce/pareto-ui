@@ -10,11 +10,11 @@
 # the Software to reproduce, distribute copies to the public, prepare derivative works, and perform
 # publicly and display publicly, and to permit others to do so.
 #####################################################################################################
-import json
-import os
-import time
 import datetime
 import logging
+import tempfile
+from contextlib import ExitStack
+from pathlib import Path
 from pareto.strategic_water_management.strategic_produced_water_optimization import (
     create_model,
     Objectives,
@@ -29,28 +29,36 @@ from pareto.strategic_water_management.strategic_produced_water_optimization imp
     DesalinationModel
 )
 from pyomo.opt import TerminationCondition
-from pareto.utilities.get_data import get_data
-from pareto.utilities.results import generate_report, PrintValues, OutputUnits, is_feasible, nostdout
+from pareto.utilities.results import generate_report, OutputUnits, nostdout
 from pareto.utilities.model_modifications import fix_vars
-import idaes.logger as idaeslog
 
-from app.internal.get_data import get_input_lists
+from app.internal.get_data import get_input_lists, get_data
 from app.internal.scenario_handler import (
     scenario_handler,
 )
 
+from app.internal.model_diagnostics import (scan_constraint_violations, unavailable_constraint_scan,
+                                            solution_is_feasible as is_feasible, SOLUTION_RELATIVE_TOLERANCE)
+from app.internal.model_compatibility import prepare_model_for_ui
+from app.internal.solvers import solver_name
+from app.internal.scenario_inputs import write_inputs
 
-# _log = idaeslog.getLogger(__name__)
 _log = logging.getLogger(__name__)
 
 
 def run_strategic_model(input_file, output_file, id, modelParameters, overrideValues={}):
     start_time = datetime.datetime.now()
+    scenario = scenario_handler.get_scenario(int(id))
+    run_revision = scenario.get('input_revision')
+    run_identity = {'input_revision': run_revision, 'run_id': scenario.get('results', {}).get('run_id')}
+    scenario["results"] = {"data": {}, "status": "Building model", **run_identity,
+                           "constraints_violations": unavailable_constraint_scan()}
+    scenario_handler.update_scenario(scenario)
 
     [set_list, parameter_list] = get_input_lists()
     
     _log.info(f"getting data from excel sheet")
-    [df_sets, df_parameters] = get_data(input_file, set_list, parameter_list)
+    [df_sets, df_parameters, _] = get_data(input_file, set_list, parameter_list)
 
     _log.info(f"creating model")
     default={
@@ -71,11 +79,8 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
         df_parameters,
         default=default
     )
+    prepare_model_for_ui(strategic_model)
     
-    scenario = scenario_handler.get_scenario(int(id))
-    results = {"data": {}, "status": "Solving model"}
-    scenario["results"] = results
-    scenario_handler.update_scenario(scenario)
     try:
         optimality_gap = int(modelParameters["optimalityGap"])/100
     except:
@@ -93,6 +98,8 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
     if options["solver"] not in ["cbc", "gurobi", "gurobi_direct"]:
         _log.info('deleting solver as it doesnt match any of the proper solver names')
         del options["solver"]
+    else:
+        options['solver'] = solver_name(options['solver'])
 
     _log.info(f"solving model with options: {options}")
 
@@ -110,11 +117,29 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
                     indexes=tuple(override_object['indexes']), 
                     v_val=float(override_object['value'])
                 )
-
-
-    model_results = solve_model(model=strategic_model, options=options)
+    try:
+        scenario = scenario_handler.get_scenario(int(id))
+        if run_revision and scenario.get('validation', {}).get('revision') == run_revision:
+            scenario['validation'].update(model_check='passed', state='model_built')
+        scenario['results'] = {'data': {}, 'status': 'Solving model', **run_identity}
+        scenario_handler.update_scenario(scenario)
+        model_results = solve_model(model=strategic_model, options=options)
+    except Exception:
+        scenario = scenario_handler.get_scenario(int(id))
+        scenario["results"]["constraints_violations"] = scan_constraint_violations(strategic_model)
+        scenario_handler.update_scenario(scenario)
+        raise
+    termination_condition = model_results.solver.termination_condition
+    constraint_violations = scan_constraint_violations(
+        strategic_model,
+        solution_state="solver_solution" if termination_condition == TerminationCondition.optimal else "current_model_values",
+        relative_tol=SOLUTION_RELATIVE_TOLERANCE,
+    )
+    scenario = scenario_handler.get_scenario(int(id))
+    scenario["results"].update(terminationCondition=str(termination_condition), constraints_violations=constraint_violations)
+    scenario_handler.update_scenario(scenario)
     with nostdout():
-        feasibility_status = is_feasible(strategic_model)
+        feasibility_status = is_feasible(strategic_model, scan=constraint_violations)
         _log.info(f"feasibility status is: {feasibility_status}")
 
     if not feasibility_status:
@@ -126,7 +151,10 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
 
 
     scenario = scenario_handler.get_scenario(int(id))
-    results = {"data": {}, "status": "Generating output", "terminationCondition": termination_condition}
+    results = {"data": {}, "status": "Generating output", "terminationCondition": str(termination_condition),
+               **run_identity,
+               'solution_status': 'optimal' if feasibility_status and termination_condition == TerminationCondition.optimal else 'feasible' if feasibility_status else 'unverified',
+               "constraints_violations": constraint_violations}
     scenario["results"] = results
 
     ## RESET override_values
@@ -163,7 +191,10 @@ def run_strategic_model(input_file, output_file, id, modelParameters, overrideVa
     total_time = datetime.datetime.now() - start_time
     _log.info(f"total process took {total_time.seconds} seconds")
 
-    return results_dict
+    return {
+        "results_data": results_dict,
+        "constraints_violations": constraint_violations,
+    }
 
 OVERRIDE_PRESET_VALUES = {
   "vb_y_Pipeline_dict": {
@@ -192,15 +223,24 @@ OVERRIDE_PRESET_VALUES = {
   },
 }
 
-def handle_run_strategic_model(input_file, output_file, id, modelParameters, overrideValues={}):
+def handle_run_strategic_model(input_file, output_file, id, modelParameters, overrideValues=None, *, input_data=None):
 
     # need to incorporate the override values back into the infrastructure table
     try:
-        results_dict = run_strategic_model(input_file, output_file, id, modelParameters, overrideValues)
+        # Keep the immutable launch snapshot private to this run and clean it up on
+        # every exit, including workbook and model construction failures.
+        with ExitStack() as stack:
+            if input_data is not None:
+                directory = stack.enter_context(tempfile.TemporaryDirectory(
+                    prefix='optimization-', dir=scenario_handler.excelsheets_path))
+                input_file = str(Path(directory) / 'inputs.xlsx')
+                write_inputs(input_data, input_file)
+            model_run_output = run_strategic_model(input_file, output_file, id, modelParameters, overrideValues or {})
         _log.info(f'successfully ran model for id #{id}, updating scenarios')
         scenario = scenario_handler.get_scenario(int(id))
         results = scenario["results"]
-        results['data'] = results_dict
+        results['data'] = model_run_output.get("results_data", {})
+        results['constraints_violations'] = model_run_output.get("constraints_violations", unavailable_constraint_scan())
         # _log.info('optimized_override_values')
         # _log.info(scenario['optimized_override_values'])
 
@@ -240,6 +280,9 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
 
         if results['terminationCondition'] == "infeasible":
             results['status'] = 'Infeasible'
+        elif results.get('solution_status') == 'unverified':
+            results['status'] = 'failure'
+            results['error'] = f"The solver stopped without a verified feasible solution ({results['terminationCondition']}). Review the inputs or allow more solver time."
         else:
             results['status'] = 'Optimized'
         scenario["results"] = results
@@ -247,13 +290,21 @@ def handle_run_strategic_model(input_file, output_file, id, modelParameters, ove
         scenario_handler.check_for_diagram(id)
     except Exception as e:
         _log.exception(f"unable to run strategic model: {e}")
-        time.sleep(2)
         scenario = scenario_handler.get_scenario(int(id))
-        results = {"data": {}, "status": "failure", "error": str(e)}
+        previous_results = scenario.get("results") or {}
+        results = {
+            "data": {}, "status": "failure", "error": str(e),
+            "terminationCondition": previous_results.get("terminationCondition"),
+            "constraints_violations": previous_results.get("constraints_violations") or unavailable_constraint_scan(),
+            'input_revision': previous_results.get('input_revision'),
+            'run_id': previous_results.get('run_id'),
+            'solution_status': previous_results.get('solution_status'),
+            'failure_stage': previous_results.get('status'),
+        }
+        if previous_results.get('status') == 'Building model' and scenario.get('validation'):
+            scenario['validation'].update(valid=False, model_check='failed', state='build_failed', error=str(e)[:2000])
         scenario["results"] = results
         scenario_handler.update_scenario(scenario)
-    try:
+    finally:
         _log.info(f'removing id {id} from background tasks')
         scenario_handler.remove_background_task(id)
-    except Exception as e:
-        _log.error(f"unable to remove id {id} from background tasks: {e}")

@@ -1,11 +1,15 @@
 import './Header.css';
-import React from 'react';
+import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import logo from "../../images/pareto-logo.png";
-import { Button, MenuItem, FormControl, Select } from '@mui/material'
+import { IconButton, Menu, MenuItem, FormControl, Select } from '@mui/material'
 import { useScenario } from 'context/ScenarioContext';
+import MenuIcon from '@mui/icons-material/Menu';
+import AISettingsDialog from '../AISettingsDialog/AISettingsDialog';
  
 export default function Header(): JSX.Element {  
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const {
     scenarios,
     scenarioIndex: index,
@@ -45,7 +49,6 @@ export default function Header(): JSX.Element {
             </Select>
             </FormControl>
             
-            <Button id='user-name' sx={{color: "#0b89b9"}} onClick={() => navigateHome?.()}>View Scenario List</Button>
           </>
         }
         {location.pathname.includes("compare") && index !== null && index !== undefined &&
@@ -53,13 +56,23 @@ export default function Header(): JSX.Element {
           <div style={{fontSize:"20px", marginLeft:"20px", color:'#0b89b9', fontWeight: "bold"}}>
             Home / {(scenarios as any)[String(index)]?.name} / Compare Scenarios
           </div>
-          <Button id='user-name' sx={{color: "#0b89b9"}} onClick={() => navigateHome?.()}>View Scenario List</Button>
         </>
         
         }
+        <IconButton aria-label="Open app menu" aria-haspopup="menu"
+          aria-controls={menuAnchor ? 'app-menu' : undefined} aria-expanded={Boolean(menuAnchor)}
+          onClick={event => setMenuAnchor(event.currentTarget)} sx={{ml: 'auto', mr: 1, color: '#565656'}}>
+          <MenuIcon />
+        </IconButton>
+        <Menu id="app-menu" anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}
+          anchorOrigin={{vertical: 'bottom', horizontal: 'right'}} transformOrigin={{vertical: 'top', horizontal: 'right'}}>
+          <MenuItem onClick={() => { setMenuAnchor(null); navigateHome?.(); }}>View scenario list</MenuItem>
+          <MenuItem onClick={() => { setMenuAnchor(null); setSettingsOpen(true); }}>Settings</MenuItem>
+        </Menu>
         </div>
       </div>
         }
+        {settingsOpen && <AISettingsDialog onClose={() => setSettingsOpen(false)} />}
         </>
       
     );

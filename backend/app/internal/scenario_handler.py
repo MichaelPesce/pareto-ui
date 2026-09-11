@@ -14,45 +14,52 @@ import logging
 import shutil
 import os
 import datetime
-import math
-import time
 from pathlib import Path
 import tinydb
 from fastapi import HTTPException
 from importlib.resources import files
 import json
+from copy import deepcopy
+import tempfile
+import threading
+from functools import wraps
 
 import idaes.logger as idaeslog
-from pareto.utilities.get_data import get_display_units
 
 from app.internal.get_data import get_data, get_input_lists
 from app.internal.settings import AppSettings
-from app.internal.ExcelApi import PreprocessMapData, WriteMapDataToExcel, UpdateExcel, WriteJSONToExcel
+from app.internal.ExcelApi import PreprocessMapData, WriteMapDataToExcel, WriteJSONToExcel
 from app.internal.util import (
     time_it, 
     FormatPrompt,
     FormatOptimizationDiagnosisPrompt,
     summarize_long_text,
-    build_map_data_from_json,
-    deriveConnections,
-    checkArcValues
 )
-from app.internal.util import check_for_missing_tables, check_for_minimum_required_tables, check_for_infeasibility
     
-from app.internal.openai_client_wrapper import cborg
+from app.internal.ai_configuration import ai_configuration as cborg
+from app.internal.model_diagnostics import build_diagnosis_context, DIAGNOSTIC_LIMITATION
+from app.internal.input_schema import input_revision, with_horizon
+from app.internal.scenario_inputs import read_inputs, write_inputs, sync_map_fields, changed_pipe_fields, prune_removed_map_nodes, rename_map_nodes
 
 # _log = idaeslog.getLogger(__name__)
 _log = logging.getLogger(__name__)
+
+def serialized(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._db_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
 
 class ScenarioHandler:
     """Manage the saved scenarios."""
 
     VERSION = 3
     SCENARIO_DB_FILE = f"scenarios.json"
-    LOCKED = False
+
 
     def __init__(self, **kwargs) -> None:
-
+        self._db_lock = threading.RLock()
         _log.info(f"initializing scenario handler")
         self.app_settings = AppSettings(**kwargs)
 
@@ -122,14 +129,10 @@ class ScenarioHandler:
         _log.info(f'moving {f_path} to {destination_path}')
         shutil.copyfile(f_path, destination_path)
 
+    @serialized
     def retrieve_scenarios(self):
         _log.info(f"retrieving scenarios")
-        # check if db is in use. if so, wait til its done being used
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+
         query = tinydb.Query()
         scenarios = self._db.search((query.id_ != None) & (query.version == self.VERSION))
         scenario_list = {}
@@ -142,46 +145,43 @@ class ScenarioHandler:
             self.scenario_list={}
 
 
-        self.LOCKED = False
-
     def retrieve_scenario(self, id):
-        ## TODO: this function is broken
-        _log.info(f"retrieving scenario: {id}")
-        query = tinydb.Query()
-        res = self._db.search((query.id_ == id) & (query.version == self.VERSION))
-        if len(res) > 0:
-            return res[0]
-        _log.info(f"no scenario found for id: {id}")
-        return None
+        return self.get_scenario(int(id))
 
+    @serialized
     def _persist_scenario(self, scenario):
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+        scenario = deepcopy(scenario)
+        data_input = scenario.get('data_input', {})
+        if 'units' not in data_input:
+            excel_path = self.excelsheets_path / f"{scenario['id']}.xlsx"
+            if excel_path.exists():
+                data_input['units'] = get_data(str(excel_path))[1]['Units']
+        revision = input_revision(scenario)
+        scenario['input_revision'] = revision
+        if scenario.get('validation', {}).get('revision') != revision:
+            from .scenario_validation import validate_inputs
+            # Refresh all input issues; previous build/solver evidence is stale.
+            scenario['validation'] = validate_inputs(scenario)
+
         query = tinydb.Query()
         self._db.upsert(
             {"scenario": scenario, 'id_': scenario['id'], 'version': self.VERSION},
             ((query.id_ == scenario['id']) & (query.version == self.VERSION)),
         )
-        self.LOCKED = False
+
         self.retrieve_scenarios()
         return scenario
 
+    @serialized
     def _save_validation_results(self, scenario, validation_payload):
-        scenario["validation"] = {
-            "valid": validation_payload.get("valid", False),
-            "missing_tables": validation_payload.get("missing_tables", []),
-            "tables_with_issues": validation_payload.get("tables_with_issues", []),
-            "check_for_missing_tables": validation_payload.get("check_for_missing_tables"),
-            "check_for_minimum_required_tables": validation_payload.get("check_for_minimum_required_tables"),
-            "check_for_infeasibility": validation_payload.get("check_for_infeasibility"),
-            "error": validation_payload.get("error"),
-        }
-        self._persist_scenario(scenario)
+        current = self.get_scenario(scenario['id'])
+        if input_revision(current) != validation_payload['revision']:
+            return {**validation_payload, 'valid': False, 'state': 'outdated', 'error': 'Inputs changed during validation. Check the current scenario again.'}
+        current['validation'] = validation_payload
+        self._persist_scenario(current)
         return validation_payload
     
+    @serialized
     def update_scenario(self, updatedScenario):
         _log.info(f"Updating scenario list")
 
@@ -226,41 +226,11 @@ class ScenarioHandler:
 
         return self._persist_scenario(updatedScenario)
     
+    @serialized
     def upload_excelsheet(self, output_path, scenarioName, filename, map_data=None, scenario_id=None):
         if scenario_id is None:
             _id = self.next_id
         _log.info(f"Uploading excel sheet: {scenarioName}")
-
-        [set_list, parameter_list] = get_input_lists()
-
-        # read in data from uploaded excel sheet
-        [df_sets, df_parameters, frontend_parameters] = get_data(output_path, set_list, parameter_list)
-        
-        try:
-            display_units = get_display_units(parameter_list, df_parameters["Units"])
-        except Exception as e:
-            _log.error(f'unable to get units: {e}')
-            display_units = {}
-
-        del frontend_parameters['Units']
-
-        # convert tuple keys into dictionary values - necessary for javascript interpretation
-        for key in df_parameters:
-            original_value = df_parameters[key]
-            new_value=[]
-            for k, v in original_value.items():
-                try:
-                    if math.isnan(v):
-                        new_value.append({'key':k, 'value': ''})
-                    else:
-                        new_value.append({'key':k, 'value': v})
-                except:
-                    new_value.append({'key':k, 'value': v})
-            df_parameters[key] = new_value
-
-        # convert pandas series into lists
-        for key in df_sets:
-            df_sets[key] = df_sets[key].values.tolist()
 
         # create scenario object
         current_day = datetime.date.today()
@@ -273,7 +243,7 @@ class ScenarioHandler:
             "name": scenarioName, 
             "id": self.next_id, 
             "date": date,
-            "data_input": {"df_sets": df_sets, "df_parameters": frontend_parameters, 'display_units': display_units, "map_data": map_data}, 
+            "data_input": read_inputs(output_path, previous={'origin': 'map' if map_data else 'excel'}, map_data=map_data),
             "optimization": 
                 {
                     "objective":"cost", 
@@ -287,15 +257,7 @@ class ScenarioHandler:
                     "scale_model": True
                 }, 
             "results": {"status": status, "data": {}},
-            "validation": {
-                "valid": None,
-                "missing_tables": [],
-                "tables_with_issues": [],
-                "check_for_missing_tables": None,
-                "check_for_minimum_required_tables": None,
-                "check_for_infeasibility": None,
-                "error": None,
-            },
+            "validation": {"valid": None, "state": "not_checked", "issues": []},
             "override_values": 
                 {
                     "vb_y_overview_dict": {},
@@ -311,148 +273,31 @@ class ScenarioHandler:
                 }
             }
 
-        # check if db is in use. if so, wait til its done being used
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+
         self._db.insert({'id_': self.next_id, "scenario": return_object, 'version': self.VERSION})
-        self.LOCKED = False
+
         
         return_object = self.check_for_diagram(self.next_id, filename.split('.')[0])
 
         self.update_next_id()
         self.retrieve_scenarios()
         
-        return return_object
+        return self._persist_scenario(return_object)
     
+    @serialized
     def update_scenario_from_excel(self, scenario, excel_path, map_data):
-        """
-        Updates a scenario with UPDATED excel, not new excel.
-        Accepts: scenario, excel_path, map_data
-        Returns
-        - dict updated with connections data
-        """
-        scenario_id = scenario.get("id", None)
-        _log.info(f"update_scenario_from_excel for id: {scenario_id}")
-        if scenario_id is None:
-            return
+        scenario['data_input'] = read_inputs(excel_path, previous=scenario.get('data_input'), map_data=map_data)
+        return self.update_scenario(scenario)
 
-        [set_list, parameter_list] = get_input_lists()
-
-        # read in data from uploaded excel sheet
-        [df_sets, df_parameters, frontend_parameters] = get_data(excel_path, set_list, parameter_list)
-        
-        try:
-            display_units = get_display_units(parameter_list, df_parameters["Units"])
-        except Exception as e:
-            _log.error(f'unable to get units: {e}')
-            display_units = {}
-
-        del frontend_parameters['Units']
-
-        # convert tuple keys into dictionary values - necessary for javascript interpretation
-        for key in df_parameters:
-            original_value = df_parameters[key]
-            new_value=[]
-            for k, v in original_value.items():
-                try:
-                    if math.isnan(v):
-                        new_value.append({'key':k, 'value': ''})
-                    else:
-                        new_value.append({'key':k, 'value': v})
-                except:
-                    new_value.append({'key':k, 'value': v})
-            df_parameters[key] = new_value
-
-        # convert pandas series into lists
-        for key in df_sets:
-            df_sets[key] = df_sets[key].values.tolist()
-
-        scenario["data_input"]= {
-            "df_sets": df_sets,
-            "df_parameters": frontend_parameters,
-            'display_units': display_units,
-            "map_data": map_data
-        }
-            
-        # check if db is in use. if so, wait til its done being used
-        db_update = {"scenario": scenario, 'id_': scenario_id, 'version': self.VERSION}
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
-        query = tinydb.Query()
-
-        self._db.update(
-            db_update,
-            ((query.id_ == scenario_id) & (query.version == self.VERSION))
-        )
-        self.LOCKED = False
-
-        self.retrieve_scenarios()
-        
-        return scenario
     
+    @serialized
     def replace_excelsheet(self, output_path, id):
-        _log.info(f"replacing excel sheet for id: {id}")
-
-        [set_list, parameter_list] = get_input_lists()
-
-        # read in data from uploaded excel sheet
-        [df_sets, df_parameters, frontend_parameters] = get_data(output_path, set_list, parameter_list)
-        
-        try:
-            display_units = get_display_units(parameter_list, df_parameters["Units"])
-        except Exception as e:
-            _log.error(f'unable to get units: {e}')
-            display_units = {}
-
-        del frontend_parameters['Units']
-
-        # convert tuple keys into dictionary values - necessary for javascript interpretation
-        for key in df_parameters:
-            original_value = df_parameters[key]
-            new_value=[]
-            for k, v in original_value.items():
-                try:
-                    if math.isnan(v):
-                        new_value.append({'key':k, 'value': ''})
-                    else:
-                        new_value.append({'key':k, 'value': v})
-                except:
-                    new_value.append({'key':k, 'value': v})
-            df_parameters[key] = new_value
-
-        # convert pandas series into lists
-        for key in df_sets:
-            df_sets[key] = df_sets[key].values.tolist()
-
+        self.ensure_editable(id)
         scenario = self.get_scenario(id)
-        scenario["results"]["status"] = "Draft"
-        scenario["data_input"]["df_sets"] = df_sets
-        scenario["data_input"]["df_parameters"] = frontend_parameters
-        scenario["data_input"]["display_units"] = display_units
+        scenario['data_input'] = read_inputs(output_path, previous={'origin': 'excel'})
+        scenario['results'] = {'status': 'Draft', 'data': {}}
+        return self.save_inputs(scenario)
 
-        # check if db is in use. if so, wait til its done being used
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
-        query = tinydb.Query()
-        self._db.upsert(
-            {"scenario": scenario, 'id_': scenario['id'], 'version': self.VERSION},
-            ((query.id_ == scenario['id']) & (query.version == self.VERSION)),
-        )
-        # self._db.insert({'id_': self.next_id, "scenario": return_object, 'version': self.VERSION})
-        self.LOCKED = False
-    
-        self.retrieve_scenarios()
-        
-        return scenario
     
     def check_for_diagram(self, id, filename = None):
         scenario = self.get_scenario(id)
@@ -490,6 +335,7 @@ class ScenarioHandler:
             return scenario
 
 
+    @serialized
     def copy_scenario(self, id, new_scenario_name):
         _log.info(f"copying scenario with id: {id}")
 
@@ -548,14 +394,9 @@ class ScenarioHandler:
 
 
             # add record in db for new scenario
-            # check if db is in use. if so, wait til its done being used
-            locked = self.LOCKED
-            while(locked):
-                time.sleep(0.5)
-                locked = self.LOCKED
-            self.LOCKED = True
+
             self._db.insert({'id_': new_scenario_id, "scenario": new_scenario, 'version': self.VERSION})
-            self.LOCKED = False
+
             self.update_next_id()
             self.retrieve_scenarios()
 
@@ -568,19 +409,16 @@ class ScenarioHandler:
                     500, f"unable to make copy of scenario with id {id}: {e}"
                 )
 
+    @serialized
     def delete_scenario(self, index):
+        self.ensure_editable(index)
         _log.info(f"Deleting scenario #{index}")
-        # check if db is in use. if so, wait til its done being used
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+
         try:
             index = int(index)
             query = tinydb.Query()
             self._db.remove((query.id_ == index) & (query.version == self.VERSION))
-            self.LOCKED = False
+
 
             # remove input excel sheet
             excel_sheet = "{}/{}.xlsx".format(self.excelsheets_path,index)
@@ -623,24 +461,18 @@ class ScenarioHandler:
         # update scenario list
         self.retrieve_scenarios()
 
+    @serialized
     def get_scenario(self, id):
-        ## TODO: THis function is broken. should id be string or number, or does it not matter?
-        _log.info(f"inside get_scenario")
-        try:
-            # check if db is in use. if so, wait til its done being used
-            locked = self.LOCKED
-            while(locked):
-                time.sleep(0.5)
-                locked = self.LOCKED
-            self.LOCKED = True
-            query = tinydb.Query()
-            scenario = self._db.search((query.id_ == id) & (query.version == self.VERSION))
-            self.LOCKED = False
-            _log.info(f"returning scenario[0]['scenario]")
-            return scenario[0]['scenario']
-        except Exception as e:
-            _log.error(f'unable to get scenario with id {id}: {e}')
-            return {'error': f'unable to get scenario with id {id}: {e}'}
+        query = tinydb.Query()
+        records = self._db.search((query.id_ == int(id)) & (query.version == self.VERSION))
+        if not records:
+            raise HTTPException(404, detail=f'Scenario {id} was not found.')
+        result = deepcopy(records[0]['scenario'])
+        data = result.get('data_input', {})
+        if 'units' not in data:
+            data['units'] = get_data(self.get_excelsheet_path(id))[1]['Units']
+        result['input_revision'] = input_revision(result)
+        return result
 
     def get_plots(self, id):
         return_object = {}
@@ -663,10 +495,13 @@ class ScenarioHandler:
                 )
         return return_object
 
+    @serialized
     def add_background_task(self, id):
+        self.ensure_editable(id)
         self.background_tasks.append(id)
         return self.background_tasks
 
+    @serialized
     def remove_background_task(self, id):
         if id in self.background_tasks: 
             self.background_tasks.remove(id)
@@ -674,8 +509,9 @@ class ScenarioHandler:
             _log.error(f'id #{id} is not in background tasks list')
         return self.background_tasks
 
+    @serialized
     def get_list(self):
-        return self.scenario_list
+        return deepcopy(self.scenario_list)
 
     def get_next_id(self):
         nextid = self.next_id
@@ -720,14 +556,10 @@ class ScenarioHandler:
             _log.error(f"error: unable to find diagram for id {id}: {e}")
             raise HTTPException(400, detail=f"no diagram found: {e}")
         
+    @serialized
     def update_next_id(self):
         try:
-            # check if db is in use. if so, wait til its done being used
-            locked = self.LOCKED
-            while(locked):
-                time.sleep(0.5)
-                locked = self.LOCKED
-            self.LOCKED = True
+
 
             query = tinydb.Query()
             # el = self._db.search((query.version == self.VERSION))[-1]
@@ -744,40 +576,23 @@ class ScenarioHandler:
             _log.info(f"no documents found; next id is 0")
             _log.error(f"{e}")
 
-        self.LOCKED = False
 
     def get_background_tasks(self):
         return self.background_tasks
 
+    @serialized
     def update_excel(self, id, table_key, updatedTable):
-        _log.info(f'updating id {id} table {table_key}')
-        excel_path = self.get_excelsheet_path(id)
+        self.ensure_editable(id)
+        scenario = self.get_scenario(int(id))
+        if table_key not in scenario['data_input']['df_parameters']:
+            raise HTTPException(400, detail='Unknown input table.')
+        scenario['data_input']['df_parameters'][table_key] = deepcopy(updatedTable)
+        return self.save_inputs(scenario)
 
-        UpdateExcel(excel_path=excel_path, table_key=table_key, updatedTable=updatedTable)
-        # fetch scenario
-        try:
-            # check if db is in use. if so, wait til its done being used
-            locked = self.LOCKED
-            while(locked):
-                time.sleep(0.5)
-                locked = self.LOCKED
-            self.LOCKED = True
-            query = tinydb.Query()
-            scenario = self._db.search((query.id_ == int(id)) & (query.version == self.VERSION))[0]['scenario']
-            scenario["data_input"]["df_parameters"][table_key] = updatedTable
-        except Exception as e:
-            _log.info(f"unable to fetch scenario: {e}")
-        self.LOCKED = False
-        # update scenario
-        return self.update_scenario(scenario)
 
+    @serialized
     def upload_diagram(self, output_path, id, diagram_type):
-        # check if db is in use. if so, wait til its done being used
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+
         query = tinydb.Query()
         scenario = self._db.search((query.id_ == int(id)) & (query.version == self.VERSION))[0]['scenario']
         scenario[f"{diagram_type}DiagramExtension"] = output_path.split('.')[-1]
@@ -785,7 +600,7 @@ class ScenarioHandler:
             {"scenario": scenario, 'id_': scenario['id'], 'version': self.VERSION},
             ((query.id_ == scenario['id']) & (query.version == self.VERSION)),
         )
-        self.LOCKED = False
+
         self.retrieve_scenarios()
         
         return
@@ -808,40 +623,62 @@ class ScenarioHandler:
     def get_assets_dir(self):
         return Path(f'{os.path.dirname(os.path.abspath(__file__))}/assets/')
     
-    @time_it
+    @serialized
     def propagate_map_data(self, scenario):
-        data_input = scenario.get("data_input", {})
-        map_data = data_input.get("map_data", None)
-        excel_path = self.get_excelsheet_path(scenario.get("id"))
-        if map_data is not None:
-            ## 1) Format map data for writing to Excel
-            preprocessed_map_data = PreprocessMapData(data_input)
+        self.ensure_editable(scenario['id'])
+        previous = self.get_scenario(scenario['id'])
+        renames = scenario['data_input'].get('map_data', {}).pop('_node_renames', {})
+        if renames:
+            old_nodes = previous['data_input'].get('map_data', {}).get('all_nodes', {})
+            if any(old not in old_nodes or new in old_nodes or not isinstance(new, str) or not new.strip() for old, new in renames.items()) or len(set(renames.values())) != len(renames):
+                raise HTTPException(400, detail='A renamed facility needs a unique, nonempty name.')
+            previous['data_input'] = rename_map_nodes(previous['data_input'], renames)
+            scenario['data_input'] = rename_map_nodes(scenario['data_input'], renames)
+        data = PreprocessMapData(scenario['data_input'])
+        data['_changed_pipe_fields'] = changed_pipe_fields(data, previous['data_input'].get('map_data'))
+        excel_path = self.get_excelsheet_path(scenario['id'])
+        with tempfile.TemporaryDirectory(dir=self.excelsheets_path) as directory:
+            target = str(Path(directory) / 'map')
+            # Rebuild from the canonical tables, never an older workbook revision.
+            write_inputs(prune_removed_map_nodes(previous['data_input'], data), target + '.xlsx', template=excel_path)
+            WriteMapDataToExcel(data, target, target + '.xlsx', previous_map_data=previous['data_input'].get('map_data'))
+            data.pop('_changed_pipe_fields', None)
+            scenario['data_input'] = read_inputs(target + '.xlsx', previous=scenario['data_input'], map_data=data)
+        return self.save_inputs(scenario)
 
-            ## 2) Write map data to Excel
-            WriteMapDataToExcel(preprocessed_map_data, output_file_name=excel_path.replace(".xlsx", ""), template_location=excel_path)
 
-            ## 3) Extract Excel data into JSON, save in DB
-            self.update_scenario_from_excel(scenario=scenario, excel_path=excel_path, map_data=preprocessed_map_data)
-
-    @time_it
     def propagate_json_data(self, scenario):
-        data_input = scenario.get("data_input", {})
-        excel_path = self.get_excelsheet_path(scenario.get("id"))
-        if data_input is not None:
-            scenario.setdefault("data_input", {})
-            scenario["data_input"]["map_data"] = build_map_data_from_json(data_input)
+        self.ensure_editable(scenario['id'])
+        return self.save_inputs(scenario)
 
-            ## 2) After formatting, save in DB
-            self.update_scenario(scenario)
+    def ensure_editable(self, id):
+        if int(id) in self.background_tasks:
+            raise HTTPException(409, detail='Wait for this optimization to finish before editing its inputs.')
 
-            ## 3) Update Excel
-            excel_data = {
-                **data_input.get("df_sets"),
-                **data_input.get("df_parameters"),
-            }
-            WriteJSONToExcel(excel_data, excel_path.replace(".xlsx", ""))
+    @serialized
+    def save_inputs(self, scenario):
+        self.ensure_editable(scenario['id'])
+        sync_map_fields(scenario['data_input'])
+        path = self.get_excelsheet_path(scenario['id'])
+        with tempfile.TemporaryDirectory(dir=self.excelsheets_path) as directory:
+            staged = Path(directory) / 'inputs.xlsx'
+            write_inputs(scenario['data_input'], staged, template=path)
+            scenario['data_input'] = read_inputs(staged, previous=scenario['data_input'])
+            os.replace(staged, path)
+        if scenario.get('results', {}).get('status') == 'Optimized':
+            scenario['results']['status'] = 'Not Optimized'
+        return self.update_scenario(scenario)
+
+    @serialized
+    def update_horizon(self, id, periods):
+        self.ensure_editable(id)
+        scenario = self.get_scenario(id)
+        scenario['data_input'] = with_horizon(scenario['data_input'], periods)
+        return self.save_inputs(scenario)
+
             
 
+    @serialized
     def create_scenario_from_data_input_json(self, data_input, scenarioName = "New Scenario From Data Input"):
         new_id = self.next_id
         current_day = datetime.date.today()
@@ -905,190 +742,26 @@ class ScenarioHandler:
         WriteJSONToExcel(data=excel_data, output_file_name=excel_path, template_location=pareto_excel_template)
 
 
-        # check if db is in use. if so, wait til its done being used
         # TODO: uncomment
-        locked = self.LOCKED
-        while(locked):
-            time.sleep(0.5)
-            locked = self.LOCKED
-        self.LOCKED = True
+
         self._db.insert({'id_': new_id, "scenario": return_object, 'version': self.VERSION})
-        self.LOCKED = False
+
         self.update_next_id()
         self.retrieve_scenarios()
         
         return return_object
     
-    @time_it
-    def validate__pareto_scenario(self, id):
-        try:
-            scenario = self.scenario_list[id]
+    def validate__pareto_scenario(self, id, solve=False):
+        from app.internal.scenario_validation import validate_inputs, check_model
+        scenario = self.get_scenario(id)
+        result = validate_inputs(scenario)
+        if result['valid']:
+            with tempfile.TemporaryDirectory(dir=self.excelsheets_path) as directory:
+                path = Path(directory) / 'validation.xlsx'
+                write_inputs(scenario['data_input'], path)
+                result = check_model(scenario, path, result, solve=solve)
+        return self._save_validation_results(scenario, result)
 
-            ## step 1: check for missing tables
-            validation_results = check_for_missing_tables(scenario=scenario)
-            passed_validation = validation_results.get("result")
-            err = validation_results.get("e")
-
-            if not passed_validation:
-                if isinstance(err, str):
-                    err_message = err
-                else:
-                    err_message = getattr(err, "message", None)
-                    if not isinstance(err_message, str) or not err_message:
-                        err_args = getattr(err, "args", ())
-                        if len(err_args) > 0 and isinstance(err_args[0], str):
-                            err_message = err_args[0]
-                        else:
-                            err_message = str(err)
-
-                missing_tables_split = err_message.split("data tabs: ")
-                _log.info(f"missing_tables_split: {missing_tables_split}")
-                if len(missing_tables_split) > 1:
-                    missing_tables = missing_tables_split[1].split(", ")
-                else:
-                    missing_tables = []
-                return self._save_validation_results(scenario, {
-                    "valid": False,
-                    "error": err_message,
-                    "missing_tables": missing_tables,
-                    "check_for_missing_tables": False,
-                    "check_for_minimum_required_tables": False,
-                    "check_for_infeasibility": False,
-                    "tables_with_issues": [],
-                })
-            else:
-                missing_tables = []
-
-            ## step 2: use custom function to ensure minimum tables have values
-            tables_with_issues = check_for_minimum_required_tables(scenario)
-            if len(tables_with_issues) > 0:
-                return self._save_validation_results(scenario, {
-                    "valid": False,
-                    "missing_tables": missing_tables,
-                    "check_for_missing_tables": True,
-                    "check_for_minimum_required_tables": False,
-                    "tables_with_issues": tables_with_issues,
-                    "check_for_infeasibility": False,
-                })
-            
-            ## step 3: create the model and check for infeasbility
-            excel_path = f"{self.excelsheets_path}/{id}.xlsx"
-            is_feasible = check_for_infeasibility(scenario=scenario, excel_path=excel_path)
-            return self._save_validation_results(scenario, {
-                    "valid": is_feasible,
-                    "missing_tables": missing_tables,
-                    "check_for_missing_tables": True,
-                    "check_for_minimum_required_tables": True,
-                    "tables_with_issues": tables_with_issues,
-                    "check_for_infeasibility": is_feasible,
-                })
-
-        except Exception as e:
-            _log.exception("Error on validate_scenario")
-            scenario = self.scenario_list.get(id)
-            payload = {
-                "valid": False,
-                "error": f"{e}"
-            }
-            if scenario is not None:
-                return self._save_validation_results(scenario, payload)
-            return payload
-    
-    @time_it
-    def validate_scenario(self, id):
-        """
-        Docstring for validate_scenario
-        
-        :param id: scenario id
-
-        This function is designed to determine whether a scenario is ready to be optimized.
-        If not, return the tables that need to be completed.
-        """
-        _log.info(f"validating scenario: {id}")
-
-        # These tables are candidates for AI fill. They require inputs for each time period
-        forecast_tables = [
-            # Do these all need values? It appears some can be 0
-            # Is there a rule for how the values in these tables must add up?
-            "CompletionsDemand", "PadRates", "FlowbackRates", 
-            "WellPressure", "InitialPipelineCapacity",
-            "ReuseMinimum", "ReuseCapacity", 
-            "ExtWaterSourcingAvailability", "DisposalOperatingCapacity"
-        ]
-
-        arc_tables = [
-            # We know where the arcs are, so we know WHICH cells need values here
-            # We can probably use AI Fill for these
-            # InitialPipelineDiameters must use values from PipelineDiameterValues table
-            "PipelineOperationalCost", "InitialPipelineDiameters", "PipelineExpansionDistance",
-            # "InitialTreatmentCapacity", <- ## TODO: How to handle this guy with technologies
-        ]
-
-        # Most of the following are one off value for a node
-        # For TruckingTime, TruckingHourlyCost, PadWaterQuality, and 
-        # (possibly) PadStorageInitialWaterQuality, we need to look at CP and PP
-        initial_capacities = [
-            # ASSUMING these all need to have values
-            "InitialDisposalCapacity", "InitialStorageCapacity", "PadOffloadingCapacity",
-            "NodeCapacities", "CompletionsPadStorage",
-        ]
-
-        simple_cost_tables = [
-            "DisposalOperationalCost", "ReuseOperationalCost", "ExternalSourcingCost",
-            "TruckingHourlyCost", "BeneficialReuseCost", "BeneficialReuseCredit",
-
-        ]
-        
-        manual_fill_tables = [
-            # These can all be filled in on the map
-            "DesalinationSites", "CompletionsPadOutsideSystem", "ExternalWaterQuality",
-            "PadWaterQuality", "StorageInitialWaterQuality", "PadStorageInitialWaterQuality",
-            "SWDDeep", "SWDAveragePressure", "SWDProxPAWell", "SWDProxInactiveWell", 
-            "SWDProxEQ", "SWDProxFault", "SWDProxHpOrLpWell", "SWDRiskFactors"
-        ]
-
-        ## TODO: need to figure out what to do with these tables
-        question_marks = [
-            "TruckingTime", ## TruckingTime maps PP, CP against K
-            "TreatmentOperationalCost", "DisposalExpansionCost", "DisposalCapacityIncrements",
-            "StorageExpansionCost", "StorageCapacityIncrements", "TreatmentExpansionCost",
-            "TreatmentCapacityIncrements", "PipelineCapexCapacityBased", "TreatmentExpansionLeadTime",
-            "DisposalExpansionLeadTime", "StorageExpansionLeadTime", "PipelineExpansionLeadTime_Dist",
-            "PipelineExpansionLeadTime_Capac"
-        ]
-
-
-        tables_with_issues = []
-
-        try:
-            scenario = self.scenario_list[id]
-            data_input = scenario.get("data_input")
-            input_tables = data_input.get("df_sets", {}) | data_input.get("df_parameters", {})
-
-            connections = deriveConnections(data_input)
-            for arc_table in arc_tables:
-                input_table = input_tables[arc_table]
-                is_valid = checkArcValues(
-                    input_table=input_table,
-                    input_table_key="NODES",
-                    connections=connections
-                )
-                if not is_valid:
-                    tables_with_issues.append(arc_table)
-            # print(input_tables.keys())
-        
-        except Exception as e:
-            _log.error(f"Error on validate_scenario: {e}")
-            return {
-                "valid": False,
-                "error": f"{e}",
-                "tables_with_issues": tables_with_issues
-            }
-
-        return {
-            "valid": len(tables_with_issues) == 0,
-            "tables_with_issues": tables_with_issues
-        }
     
     @time_it
     def generate_data_with_ai(self, id, user_prompt):
@@ -1178,26 +851,17 @@ class ScenarioHandler:
                 "errorMessage": "AI client is not configured. Provide an API key to enable AI features."
             }
 
-        failure_message = error_message or scenario.get("results", {}).get("error")
+        results = scenario.get("results") or {}
+        failure_message = results.get("error") or error_message
+        if not failure_message and (results.get("status") == "Infeasible" or results.get("terminationCondition") == "infeasible"):
+            failure_message = "Optimization terminated as infeasible."
         if not failure_message:
             return {
                 "status": "error",
                 "errorMessage": "No optimization failure message was available to diagnose."
             }
 
-        scenario_context = {
-            "id": scenario.get("id"),
-            "name": scenario.get("name"),
-            "optimization": scenario.get("optimization", {}),
-            "validation": scenario.get("validation", {}),
-            "override_values": scenario.get("override_values", {}),
-            "results": {
-                "status": scenario.get("results", {}).get("status"),
-                "terminationCondition": scenario.get("results", {}).get("terminationCondition"),
-                "error": scenario.get("results", {}).get("error"),
-            },
-            "data_input": scenario.get("data_input", {}),
-        }
+        diagnosis_context = build_diagnosis_context(scenario)
 
         truncated_failure_message = summarize_long_text(
             failure_message,
@@ -1207,7 +871,7 @@ class ScenarioHandler:
 
         prompt = FormatOptimizationDiagnosisPrompt(
             error_message=truncated_failure_message,
-            scenario=scenario_context,
+            diagnosis_context=json.dumps(diagnosis_context, default=str),
         )
         _log.info("hitting cborg for optimization diagnosis")
 
@@ -1221,18 +885,35 @@ class ScenarioHandler:
                 "errorMessage": f"Unable to process AI diagnosis response: {e}"
             }
 
+        if not isinstance(answer, dict):
+            return {"status": "error", "errorMessage": "AI returned an invalid diagnosis."}
+
         if answer.get("status") != "success":
             return {
                 "status": "error",
-                "errorMessage": answer.get("errorMessage", "AI could not diagnose the optimization failure.")
+                "errorMessage": str(answer.get("errorMessage") or "AI could not diagnose the optimization failure.")
             }
+
+        if (
+            not isinstance(answer.get("summary"), str)
+            or not isinstance(answer.get("likelyCauses", []), list)
+            or not all(isinstance(item, str) for item in answer.get("likelyCauses", []))
+            or not isinstance(answer.get("cautionNotes", []), list)
+            or not all(isinstance(item, str) for item in answer.get("cautionNotes", []))
+            or not isinstance(answer.get("nextSteps"), list)
+            or not all(isinstance(step, dict) and isinstance(step.get("title"), str)
+                       and isinstance(step.get("instruction"), str)
+                       and all(step.get(key) is None or isinstance(step[key], str) for key in ("reason", "appArea"))
+                       for step in answer.get("nextSteps", []))
+        ):
+            return {"status": "error", "errorMessage": "AI returned an invalid diagnosis format. Please try again."}
 
         diagnosis_record = {
             "status": "success",
             "summary": answer.get("summary", ""),
             "likelyCauses": answer.get("likelyCauses", []),
             "nextSteps": answer.get("nextSteps", []),
-            "cautionNotes": answer.get("cautionNotes", []),
+            "cautionNotes": [*answer.get("cautionNotes", []), DIAGNOSTIC_LIMITATION],
             "diagnosedAt": self._utc_timestamp(),
             "sourceErrorMessage": failure_message,
             "outdated": False,

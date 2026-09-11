@@ -36,6 +36,9 @@ jobs:
           environment-file: environment.yml
           miniforge-version: latest
           activate-environment: pareto-ui-env
+          # Hosted runners are discarded; the environment is removed below.
+          # Avoid a second, slow deletion of Conda's shared package cache on Windows.
+          run-post: false
 
       - name: Install python packages
         run: pip install -r backend/requirements.txt
@@ -56,8 +59,16 @@ jobs:
         run: |
           npm --prefix electron/ui clean-install
 
+      - name: run backend regression tests
+        env:
+          PYTHONPATH: backend
+        run: python -m unittest discover -s backend/tests
+
       - name: run component tests
         run: npm --prefix electron/ui test
+
+      - name: run desktop settings tests
+        run: node --test electron/tests/*.test.cjs
 
       - name: DEBUG - pip freeze
         run: pip freeze

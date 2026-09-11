@@ -11,6 +11,7 @@
 # publicly and display publicly, and to permit other to do so.
 #####################################################################################################
 
+import logging
 import warnings
 import pandas as pd
 import numpy as np
@@ -24,10 +25,35 @@ from pareto.utilities.get_data import (
     parameter_tabs_all_models,
     get_valid_input_set_tab_names,
     get_valid_input_parameter_tab_names,
-    _sheets_to_dfs,
+    DataLoadingError,
     _cleanup_data,
     _df_to_param
 )
+
+_log = logging.getLogger(__name__)
+
+
+def _sheets_to_dfs(src, raises=True, **kwargs):
+    """Keep the parent's sheet fallback behavior while closing its Excel reader.
+
+    The pinned parent's helper leaves readers open, including on failed sheets.
+    Windows cannot replace or remove those workbooks until every reader closes.
+    """
+    tables, failed = {}, {}
+    with pd.ExcelFile(src) as workbook:
+        for sheet_name in workbook.sheet_names:
+            try:
+                tables[sheet_name] = workbook.parse(sheet_name=sheet_name, **kwargs).squeeze("columns")
+            except Exception as error:
+                _log.warning("Loading failed for sheet %r: %r", sheet_name, error)
+                failed[sheet_name] = error
+                tables[sheet_name] = pd.DataFrame()
+    if failed:
+        error = DataLoadingError(failed)
+        if raises:
+            raise error
+        warnings.warn(error.summary + "\nFor these sheets, an empty dataframe is used as fallback.\n")
+    return tables
 
 
 
@@ -53,6 +79,7 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     """
     frontend_parameters = {}
     pareto_input_set_tab_names = get_valid_input_set_tab_names(_model_type)
+    pareto_input_set_tab_names = [*pareto_input_set_tab_names, 'TimePeriods']
     pareto_input_parameter_tab_names = get_valid_input_parameter_tab_names(_model_type)
 
     if _set_list is not None:
@@ -75,8 +102,8 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     # Check all names available in the input sheet
     # If the sheet name is unused (not a valid Set or Parameter tab, not "Overview", and not "Schematic"), raise a warning.
     unused_tab_list = []
-    df = pd.ExcelFile(_fname)
-    sheet_list = df.sheet_names
+    with pd.ExcelFile(_fname) as workbook:
+        sheet_list = workbook.sheet_names
     for name in sheet_list:
         if (
             name not in valid_set_tab_names
@@ -160,6 +187,11 @@ def _read_data(_fname, _set_list, _parameter_list, _model_type="strategic", rais
     remove_columns = ["unnamed", "proprietary data"]
     keyword_strings = ["PROPRIETARY DATA", "proprietary data", "Proprietary Data"]
     for i in _df_parameters:
+        # A one-column parameter sheet contains only row labels and no values
+        # (e.g. NOA after removing all ReuseOptions). Do not interpret its node
+        # names as parameter values, or construct bogus Pyomo indices from them.
+        if isinstance(_df_parameters[i], pd.Series):
+            _df_parameters[i] = pd.DataFrame()
         if proprietary_data is False:
             proprietary_data = any(
                 x in _df_parameters[i].values.astype(str) for x in keyword_strings
@@ -319,12 +351,21 @@ def get_data(
     # The set for time periods is defined based on the columns of the parameter for
     # Completions Demand. This is done so the user does not have to add an extra tab
     # in the spreadsheet for the time period set
-    if "CompletionsDemand" in _df_parameters.keys():
+    if "TimePeriods" not in _df_sets and "CompletionsDemand" in _df_parameters.keys():
         _df_sets["TimePeriods"] = _df_parameters[
             "CompletionsDemand"
         ].columns.to_series()
     # The data frame for Parameters is preprocessed to match the format required by Pyomo
+    empty_tables = [name for name, frame in _df_parameters.items() if frame.empty]
     _df_parameters = _df_to_param(_df_parameters, data_column, sum_repeated_indexes)
+    # Some PARETO versions convert empty tables with headers to {column: {}}.
+    # The model requires an empty parameter dictionary, not nested empty values.
+    for name in empty_tables:
+        _df_parameters[name] = {}
+    from pareto.utilities.process_data import get_valid_piping_arc_list, get_valid_trucking_arc_list
+    for name in get_valid_piping_arc_list() + get_valid_trucking_arc_list():
+        if name in _df_parameters:
+            _df_parameters[name] = {key: value for key, value in _df_parameters[name].items() if value not in (0, '0', False)}
     return [_df_sets, _df_parameters, frontend_parameters]
 
 

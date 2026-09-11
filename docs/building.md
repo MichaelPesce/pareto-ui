@@ -2,6 +2,14 @@
 
 This document covers local development builds and the GitHub Actions build workflow for PARETO UI.
 
+The parent model is pinned to a tested commit in
+[backend/requirements.txt](../backend/requirements.txt). To upgrade it, change that
+pin and run the [workflow regression checks](scenario-validation.md#verification)
+on Linux and Windows before publishing a build.
+
+Install CBC through `idaes get-extensions` as shown below. The app uses its
+full-precision NL/ASL interface so solution-file rounding cannot alter water balances.
+
 ## Repository layout
 
 - `backend/`: FastAPI backend packaged with PyInstaller for desktop builds.

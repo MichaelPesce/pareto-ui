@@ -80,13 +80,13 @@ export default function Optimization(props: OptimizationProps) {
      */
      else if (name === "solver"){
       if(value === "cbc") {
-        const tempScenario = {...props.scenario}
+        const tempScenario = {...props.scenario, optimization: {...props.scenario.optimization}}
         tempScenario.optimization[name] = value
         tempScenario.optimization.runtime = defaultRuntimes["cbc"]
         tempScenario.optimization.scale_model = defaultScaleModel["cbc"]
         props.updateScenario(tempScenario)
       } else if (value === "gurobi_direct") {
-        const tempScenario = {...props.scenario}
+        const tempScenario = {...props.scenario, optimization: {...props.scenario.optimization}}
         tempScenario.optimization[name] = value
         tempScenario.optimization.runtime = defaultRuntimes["gurobi"]
         tempScenario.optimization.scale_model = defaultScaleModel["gurobi"]
@@ -94,7 +94,7 @@ export default function Optimization(props: OptimizationProps) {
       }
      }
      else {
-      const tempScenario = {...props.scenario}
+      const tempScenario = {...props.scenario, optimization: {...props.scenario.optimization}}
       // coerce numeric fields to numbers
       if (name === 'runtime' || name === 'optimalityGap') {
         tempScenario.optimization[name] = Number(value);
@@ -104,11 +104,6 @@ export default function Optimization(props: OptimizationProps) {
       props.updateScenario(tempScenario)
      }
    }
-
-  const handleOptimize = () => {
-   props.setDisabled(true)
-   props.handleRunModel()
-  }
 
   return ( 
     <Grid container spacing={2} style={styles.gridContainer}>
@@ -313,7 +308,7 @@ export default function Optimization(props: OptimizationProps) {
               sx={styles.filled} 
               variant="contained" 
               size="large" 
-              disabled={props.backgroundTasks.length > 0 || props.disabled} 
+              disabled={props.backgroundTasks.length > 0 || props.disabled || props.saving}
               endIcon={<ArrowForwardIcon />}> 
               Optimize 
             </Button>
@@ -329,5 +324,3 @@ export default function Optimization(props: OptimizationProps) {
   );
 
 }
-
-

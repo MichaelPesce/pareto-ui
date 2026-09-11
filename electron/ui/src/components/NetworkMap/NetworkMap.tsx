@@ -11,7 +11,8 @@ import {
     NetworkNodeTypes,
     formatCoordinatesFromNodes,
     convertMapDataToFrontendFormat,
-    convertMapDataToBackendFormat
+    convertMapDataToBackendFormat,
+    getAllowedPipelineConnectionCandidates,
 } from '../../util';
 import { useMapValues } from '../../context/MapContext';
 
@@ -112,7 +113,7 @@ const getFlowArrowsForLine = (line: any, lineIndex: number) => {
 
         const hasDownFlow = hasFlowBetweenNodes(nodes, idx, idx + 1);
         const hasUpFlow = hasFlowBetweenNodes(nodes, idx + 1, idx);
-        const showDownFlow = hasDownFlow || (!hasDownFlow && !hasUpFlow);
+        const showDownFlow = hasDownFlow;
         const showUpFlow = hasUpFlow;
 
         const pushArrow = (source: LatLngPair, target: LatLngPair, key: string) => {
@@ -129,16 +130,19 @@ const getFlowArrowsForLine = (line: any, lineIndex: number) => {
         };
 
         if (showDownFlow) {
-            pushArrow(fromCoords, toCoords, `${lineIndex}:${idx}:down`);
+            const route = nodes[idx]?.segment_coordinates;
+            const beforeEnd = route?.length > 1 ? toLatLngPair(route[route.length - 2]) : null;
+            pushArrow(beforeEnd || fromCoords, toCoords, `${lineIndex}:${idx}:down`);
         }
         if (showUpFlow) {
-            pushArrow(toCoords, fromCoords, `${lineIndex}:${idx}:up`);
+            const route = nodes[idx]?.segment_coordinates;
+            const afterStart = route?.length > 1 ? toLatLngPair(route[1]) : null;
+            pushArrow(afterStart || toCoords, fromCoords, `${lineIndex}:${idx}:up`);
         }
     }
 
     return arrows;
 };
-
 
 export default function NetworkMap(props: NetworkMapProps) {
     const { map_data, interactive = false, showMapTypeToggle = false, width = 100, height = 50 } = props;
@@ -158,6 +162,8 @@ export default function NetworkMap(props: NetworkMapProps) {
         selectedNode,
         setNetworkMapData,
         selectingPipelineConnectionFromMap,
+        pipelineConnectionSelectionIndex,
+        availableNodes,
     } = useMapValues();
     const selectedNodeData = selectedNode?.node ?? (selectedNode as any);
     const selectedNodeType = selectedNodeData?.node_type;
@@ -273,6 +279,20 @@ export default function NetworkMap(props: NetworkMapProps) {
 
     }, [map_data])
 
+    const getPipelineConnectionTooltip = (candidateNode: any): string => {
+        if (!selectingPipelineConnectionFromMap || selectedNodeData?.node_type !== "path") {
+            return candidateNode?.name || "";
+        }
+
+        const pipelineNodes = selectedNodeData?.nodes || [];
+        const allowedCandidates = getAllowedPipelineConnectionCandidates(availableNodes, pipelineNodes, pipelineConnectionSelectionIndex);
+        if (allowedCandidates.some((node) => node.name === candidateNode?.name)) {
+            return `Add ${candidateNode.name} as connection`;
+        }
+
+        return `${candidateNode?.name || "This node"} cannot connect at this position. Check the adjacent node types.`;
+    };
+
     return (
         <Box sx={{ px: 4, pb: 5, pt: 3 }}>
             <style>{css}</style>
@@ -356,7 +376,7 @@ export default function NetworkMap(props: NetworkMapProps) {
                                         }
                                     }}
                                 >
-                                    <Tooltip>{selectingPipelineConnectionFromMap ? `Add ${value.name} as connection` : value.name}</Tooltip>
+                                    <Tooltip>{getPipelineConnectionTooltip(value)}</Tooltip>
                                 </Marker>
                             </React.Fragment>
                         )

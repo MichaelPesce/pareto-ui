@@ -80,6 +80,13 @@ export const NetworkNodeTypes = {
         defaultValue: 0,
         units: "foot"
       },
+      {
+        key: "TruckingHourlyCost",
+        displayName: "Trucking Hourly Cost",
+        type: "number",
+        defaultValue: 0,
+        units: "USD/hour"
+      }
     ]
   },
   CompletionsPad: {
@@ -138,6 +145,13 @@ export const NetworkNodeTypes = {
         defaultValue: 0,
         units: "foot"
       },
+      {
+        key: "TruckingHourlyCost",
+        displayName: "Trucking Hourly Cost",
+        type: "number",
+        defaultValue: 0,
+        units: "USD/hour"
+      }
     ]
   },
   DisposalSite: {
@@ -301,6 +315,13 @@ export const NetworkNodeTypes = {
         defaultValue: 0,
         units: "USD/bbl"
       },
+      {
+        key: "TruckingHourlyCost",
+        displayName: "Trucking Hourly Cost",
+        type: "number",
+        defaultValue: 0,
+        units: "USD/hour"
+      }
     ]
   },
   ReuseOption: {
@@ -342,11 +363,21 @@ export const NetworkNodeTypes = {
   }
 };
 
+export {
+  AllowedPipelineArcs, getPipelineNodeTypeCode, getMapEditorNodeType, isAllowedPipelineArc,
+  getAllowedPipelineFlowDirections, getAllowedPipelineConnectionCandidates,
+  getPipelineConnectionIssues, reconcilePipelineOutgoingNodes,
+} from './pipeline';
+
 export const formatCoordinatesFromNodes = (nodes) => {
   const coordinates = [];
-  for (let n of nodes) {
-      const coords = [parseFloat(n?.coordinates?.[1]), parseFloat(n?.coordinates?.[0])]
-      coordinates.push(coords)
+  for (const node of nodes || []) {
+    const segment = node.segment_coordinates?.length ? node.segment_coordinates : [node.coordinates];
+    for (const point of segment) {
+      const coords = [Number(point?.[1]), Number(point?.[0])];
+      const previous = coordinates[coordinates.length - 1];
+      if (!previous || coords[0] !== previous[0] || coords[1] !== previous[1]) coordinates.push(coords);
+    }
   }
   return coordinates;
 }
@@ -396,6 +427,20 @@ export const calculatePipelineSegmentLengths = (nodes = []) => {
 
   return lengths;
 }
+
+// Preserve measured or manually entered lengths on segments that survive an edit.
+export const reconcilePipelineSegmentLengths = (nextNodes = [], prevNodes = [], prevLengths = []) => {
+  const calculated = calculatePipelineSegmentLengths(nextNodes);
+  return calculated.map((length, idx) => {
+    const start = nextNodes[idx], end = nextNodes[idx + 1];
+    const oldIdx = prevNodes.findIndex((node, i) =>
+      node.name === start.name && prevNodes[i + 1]?.name === end.name
+      && String(node.coordinates) === String(start.coordinates)
+      && String(prevNodes[i + 1]?.coordinates) === String(end.coordinates));
+    const previous = oldIdx >= 0 ? prevLengths[oldIdx] : undefined;
+    return typeof previous === 'number' && Number.isFinite(previous) && previous >= 0 ? previous : length;
+  });
+};
 
 export const reverseMapCoordinates = (coords: CoordinateTuple) => {
     try {

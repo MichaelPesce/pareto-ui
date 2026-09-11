@@ -22,7 +22,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from app.internal.get_extensions import check_for_idaes_extensions, get_idaes_extensions
-from app.routers import scenarios
+from app.routers import scenarios, ai_settings
 import idaes.logger as idaeslog
 
 _log = idaeslog.getLogger(__name__)
@@ -65,6 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(scenarios.router)
+app.include_router(ai_settings.router)
 
 def getPort():
     port = 50011
