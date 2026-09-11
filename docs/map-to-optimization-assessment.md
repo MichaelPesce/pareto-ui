@@ -7,6 +7,7 @@ feasibility check described below have since been implemented. Start with the
 See [current validation behavior](scenario-validation.md) for implementation details
 and limitations. The remaining sections record the original experiments and plan;
 source links point to the revisions inspected at that time.
+Current maintenance priorities are tracked in the [roadmap](roadmap.md).
 
 The map workflow can reach a real, feasible optimization with substantially less data than the toy workbook contains. I verified this with the installed parent model and CBC, including a temporary workbook generated from `map_testing/map_testing.kml`. The investigation recommended work to protect data during map/table synchronization, establish a reliable planning horizon, and replace the fixed table checklist with requirements derived from the selected facilities and optimization settings.
 

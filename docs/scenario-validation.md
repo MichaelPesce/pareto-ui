@@ -111,6 +111,9 @@ facilities; the parent source tree is not modified.
 
 ## Verification
 
+See [Regression tests](regression-tests.md) for the test inventory, real-versus-mocked
+coverage, desktop/browser commands, and isolated browser-test setup.
+
 From the repository root, with the Python environment activated:
 
 ```bash
@@ -146,5 +149,6 @@ acceptance check covered editing periods, previewing and filling forecasts,
 validation, feasibility, optimization, and results with AI unavailable. Use
 isolated `PARETO_DATA_BASEDIR` and `PARETO_LOG_DIR` directories for manual checks.
 
-The original model research and future extensions are in
-[the assessment](map-to-optimization-assessment.md).
+See the [maintenance roadmap](roadmap.md) for planned architecture and testing
+work. The original model research remains in the historical
+[assessment](map-to-optimization-assessment.md).
